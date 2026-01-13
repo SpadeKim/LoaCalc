@@ -81,7 +81,7 @@ export default function LostArkRefiningCalc() {
   const [resultTab, setResultTab] = useState('optimal');
   const [calcResult, setCalcResult] = useState(null);
 
-  // ★ 추가: 귀속 재료 0골드 계산 여부 체크박스 상태
+  // 귀속 재료 사용 여부 체크박스
   const [isBoundMaterialFree, setIsBoundMaterialFree] = useState(false);
 
   const breathName = equipmentType === "무기" ? "용암의 숨결" : "빙하의 숨결";
@@ -209,39 +209,49 @@ export default function LostArkRefiningCalc() {
   const currentReq = REFINE_DATA[equipmentType]?.[targetLevel] || { shard: 0, fusion: 0, leap: 0, stone: 0, gold: 0 };
   const reqBreathCount = getBreathCount(targetLevel); 
 
-  // ★ 수정: 1회 트라이 비용 계산 (귀속 재료 체크 여부 반영)
-  const calculateOneTryCost = (useBreath) => {
+  // ★ (화면 표시용) 1회 트라이 비용 단순 계산
+  // 체크박스 켜져있으면: 귀속 재료가 충분하다는 가정 하에 0원으로 표시 (사용자 기대 부응)
+  // 부족하면: 시뮬레이션 결과에서 정확히 반영되지만, 여기선 단순하게 보여줌
+  const calculateDisplayCost = (useBreath) => {
     let cost = 0;
+    const items = [MAT_NAMES.shard, MAT_NAMES.fusion, MAT_NAMES.leap, MAT_NAMES.stone];
+    
+    items.forEach(name => {
+        let reqKey = Object.keys(MAT_NAMES).find(key => MAT_NAMES[key] === name);
+        let needed = currentReq[reqKey];
+        // 체크박스 켜져있고 보유량이 있으면(여기선 단순 0원 처리로 표시)
+        if (isBoundMaterialFree) {
+            // 보유량이 충분하면 0원, 아니면 차액 계산 등 복잡해지므로
+            // UI 표시용으로는 "귀속 재료 우선 사용 시 예상 비용"으로, 
+            // 현재 보유량 > 필요량이면 0원 처리
+            let have = boundItems[name] || 0;
+            let charge = Math.max(0, needed - have);
+            cost += charge * (prices[name] || 0);
+        } else {
+            cost += needed * (prices[name] || 0);
+        }
+    });
 
-    // 1. 재료 비용 (파편, 융화, 돌파석, 결정)
-    // 체크박스가 켜져 있으면(true), 재료비는 0원 처리
-    if (!isBoundMaterialFree) {
-      cost += (prices[MAT_NAMES.shard] || 0) * currentReq.shard;
-      cost += (prices[MAT_NAMES.fusion] || 0) * currentReq.fusion;
-      cost += (prices[MAT_NAMES.leap] || 0) * currentReq.leap;
-      cost += (prices[MAT_NAMES.stone] || 0) * currentReq.stone;
-    }
-
-    // 2. 골드 비용 (항상 포함)
     cost += currentReq.gold;
     
-    // 3. 숨결 비용 (풀숨일 경우)
-    // 숨결은 '귀속 재료' 체크박스와 별개로 볼 수도 있지만, 보통 재료 0원 체크 시 숨결도 있으면 쓴다고 가정할 수 있음.
-    // 하지만 "필수 재료"가 아니므로 숨결 값은 그대로 두는 경우가 많음. (여기서는 유저 요청 "필수 재료를 0골드로"에 집중)
-    // 만약 숨결도 귀속으로 처리하고 싶다면 여기에도 !isBoundMaterialFree 조건을 걸면 됨.
-    // 일단 '필수 재료'만 0원으로 처리하는 로직 유지 (숨결은 선택 재료이므로)
     if (useBreath) {
+        // 숨결도 귀속 체크? 숨결은 보통 별도지만, 여기선 필수 재료 체크박스이므로 숨결은 그대로 둠
+        // 유저 요청: "귀속 필수 재료"를 바탕으로 제외. 숨결은 선택 재료임.
         cost += (prices[MAT_NAMES.breath] || 0) * reqBreathCount; 
     }
     
     return cost;
   };
 
+  // ★ 핵심: 시뮬레이션 함수 (귀속 재료 소진 로직 포함)
   const simulateStrategy = (mixedLimit) => {
     const baseProb = BASE_PROBABILITIES[targetLevel] || 0;
     
-    const costFull = calculateOneTryCost(true);
-    const costNo = calculateOneTryCost(false);
+    // 시뮬레이션 시작 시 보유 귀속 재료 복사 (이 시뮬레이션 안에서만 소모됨)
+    // 주의: '평균'을 구하려면 이 과정을 수만 번 반복해야 정확하지만, 
+    // 여기서는 "100트까지 가는 하나의 가상 시나리오"를 비용 누적으로 계산하므로
+    // 단일 시나리오 내에서의 소모를 추적합니다.
+    let currentBound = { ...boundItems };
 
     let currentArtisan = 0;
     let totalCostAccumulated = 0; 
@@ -250,26 +260,52 @@ export default function LostArkRefiningCalc() {
     const tableRows = [];
 
     for (let tryCount = 1; tryCount <= 100; tryCount++) {
-        // 장인의 기운 100% 도달 시 -> 강제 성공 (재료비는 노숨 비용으로 소모한다고 가정)
+        // 1. 이번 트라이 비용 계산 (귀속 재료 차감 로직)
+        let tryCost = currentReq.gold; // 골드는 항상 소모
+
+        // 필수 재료 4종 계산
+        const items = [MAT_NAMES.shard, MAT_NAMES.fusion, MAT_NAMES.leap, MAT_NAMES.stone];
+        items.forEach(name => {
+            let reqKey = Object.keys(MAT_NAMES).find(key => MAT_NAMES[key] === name);
+            let needed = currentReq[reqKey];
+            
+            if (isBoundMaterialFree) {
+                let have = currentBound[name] || 0;
+                if (have >= needed) {
+                    // 귀속으로 충분함 -> 비용 0, 보유량 차감
+                    currentBound[name] -= needed;
+                } else {
+                    // 부족함 -> 있는 거 다 쓰고, 나머지는 골드로 구매
+                    let deficit = needed - have;
+                    tryCost += deficit * (prices[name] || 0);
+                    currentBound[name] = 0; // 다 씀
+                }
+            } else {
+                // 체크박스 껐으면 그냥 전액 골드
+                tryCost += needed * (prices[name] || 0);
+            }
+        });
+
+        // 숨결 여부 및 비용
         const isJangGiBaek = currentArtisan >= 100;
-        
         let shouldUseBreath = tryCount <= mixedLimit;
-        if (isJangGiBaek) {
-            shouldUseBreath = false; 
+        if (isJangGiBaek) shouldUseBreath = false; // 장기백은 노숨
+
+        if (shouldUseBreath) {
+            tryCost += (prices[MAT_NAMES.breath] || 0) * reqBreathCount;
         }
-        
+
+        // 확률 계산
         const failBonus = Math.min(tryCount - 1, 10) * (baseProb / 10);
         const breathBonus = shouldUseBreath ? baseProb : 0; 
         let successRate = baseProb + failBonus + breathBonus;
-        
-        const currentOneTryCost = shouldUseBreath ? costFull : costNo;
-
         if (isJangGiBaek) successRate = 100;
 
-        totalCostAccumulated += currentOneTryCost;
+        // 결과 누적
+        totalCostAccumulated += tryCost;
 
         if (!isJangGiBaek) {
-             expectedCost += currentOneTryCost * cumulativeFailProb;
+             expectedCost += tryCost * cumulativeFailProb;
         }
 
         tableRows.push({
@@ -277,7 +313,7 @@ export default function LostArkRefiningCalc() {
             method: isJangGiBaek ? "노숨(장기백)" : (shouldUseBreath ? "풀숨" : "노숨"),
             successRate: Math.min(successRate, 100).toFixed(2),
             artisan: Math.min(currentArtisan, 100).toFixed(2),
-            cost: currentOneTryCost.toLocaleString(undefined, {maximumFractionDigits: 0}),
+            cost: tryCost.toLocaleString(undefined, {maximumFractionDigits: 0}),
             accCost: totalCostAccumulated.toLocaleString(undefined, {maximumFractionDigits: 0})
         });
 
@@ -300,6 +336,7 @@ export default function LostArkRefiningCalc() {
   const runOptimization = () => {
     setResultTab('optimal'); 
 
+    // 시뮬레이션 할 때마다 boundItems는 초기화된 상태로 시작해야 함 (simulateStrategy 내에서 복사하므로 OK)
     const noBreathResult = simulateStrategy(0);
     const fullBreathResult = simulateStrategy(100);
 
@@ -324,8 +361,9 @@ export default function LostArkRefiningCalc() {
 
   return (
     <div className="min-h-screen bg-gray-50 p-4 font-sans text-sm">
+      {/* 1. 타이틀 수정 */}
       <header className="mb-4 border-b pb-2 flex justify-between items-center">
-        <h1 className="text-xl font-bold">재련 최적화 (T4 버전)</h1>
+        <h1 className="text-xl font-bold">세르카 장비 재련 효율 계산기</h1>
         <button 
           onClick={fetchMarketPrices}
           className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 font-bold transition flex items-center gap-2"
@@ -337,7 +375,7 @@ export default function LostArkRefiningCalc() {
 
       <div className="flex flex-col lg:flex-row gap-4">
         
-        {/* 1. 좌측 패널 */}
+        {/* 좌측 패널 */}
         <div className="w-full lg:w-1/5 bg-white rounded shadow border overflow-hidden">
           <div className="flex border-b">
             <button className={`flex-1 py-3 font-bold transition ${activeTab === 'price' ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`} onClick={() => setActiveTab('price')}>가격 정보</button>
@@ -377,7 +415,7 @@ export default function LostArkRefiningCalc() {
           </div>
         </div>
 
-        {/* 2. 중앙 패널 */}
+        {/* 중앙 패널 */}
         <div className="w-full lg:w-1/5 space-y-4">
           <div className="bg-white p-4 rounded shadow border">
             <h2 className="font-bold text-gray-700 mb-4 border-b pb-2">장비 정보</h2>
@@ -412,15 +450,23 @@ export default function LostArkRefiningCalc() {
                   let reqKey = Object.keys(MAT_NAMES).find(key => MAT_NAMES[key] === itemName);
                   let count = currentReq[reqKey];
                   let cost = (prices[itemName] || 0) * count;
+                  
+                  // 화면 표시용: 보유량 있으면 차감된 가격 보여주기
+                  let displayCost = cost;
+                  if (isBoundMaterialFree) {
+                      let have = boundItems[itemName] || 0;
+                      let needed = count;
+                      displayCost = Math.max(0, needed - have) * (prices[itemName] || 0);
+                  }
+
                   return (
                     <div key={itemName} className="flex justify-between items-center text-xs">
                         <div className="flex items-center">
                         <ItemIcon info={itemInfos[itemName]} name={itemName} />
                         <span>x {count.toLocaleString()}</span>
                         </div>
-                        {/* 귀속 재료 0원 체크 시 취소선 표시 등 시각적 효과를 줄 수도 있음 */}
-                        <span className={`text-gray-500 ${isBoundMaterialFree ? 'line-through text-gray-300' : ''}`}>
-                            {cost.toLocaleString(undefined, {maximumFractionDigits: 0})} G
+                        <span className={`text-gray-500 ${displayCost < cost ? 'text-blue-600 font-bold' : ''}`}>
+                            {displayCost.toLocaleString(undefined, {maximumFractionDigits: 0})} G
                         </span>
                     </div>
                   )
@@ -434,7 +480,7 @@ export default function LostArkRefiningCalc() {
               </div>
             </div>
 
-            {/* ★ 추가: 귀속 재료 무료 체크박스 */}
+            {/* 2. 체크박스 문구 수정 */}
             <div className="mt-3 pt-3 border-t">
                 <label className="flex items-center space-x-2 cursor-pointer select-none">
                     <input 
@@ -443,7 +489,7 @@ export default function LostArkRefiningCalc() {
                         onChange={(e) => setIsBoundMaterialFree(e.target.checked)}
                         className="w-4 h-4 text-indigo-600 rounded"
                     />
-                    <span className="text-xs font-bold text-gray-700">귀속 필수 재료를 0골드로 계산</span>
+                    <span className="text-xs font-bold text-gray-700">귀속 재료 사용 (보유량 차감)</span>
                 </label>
             </div>
 
@@ -467,7 +513,7 @@ export default function LostArkRefiningCalc() {
           </div>
         </div>
 
-        {/* 3. 우측 패널 */}
+        {/* 우측 패널 */}
         <div className="w-full lg:w-3/5 bg-white rounded shadow border flex flex-col overflow-hidden">
            {!calcResult ? (
                 <div className="flex items-center justify-center h-full text-gray-400 p-10">
