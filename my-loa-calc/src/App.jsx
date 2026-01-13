@@ -57,6 +57,11 @@ const REFINE_DATA = {
 };
 
 const ItemIcon = ({ info, name }) => {
+  // 골드는 이미지 경로 직접 지정 (public 폴더에 골드.png 필요)
+  if (name === "골드") {
+      return <img src="/골드.png" alt="골드" className="w-8 h-8 rounded mr-2 shrink-0 border border-gray-400 bg-gray-800" />;
+  }
+
   if (info && info.icon) {
     const bgClass = GRADE_BG[info.grade] || 'bg-gray-700';
     return (
@@ -65,9 +70,10 @@ const ItemIcon = ({ info, name }) => {
       </div>
     );
   }
+  
   return (
     <div className={`w-8 h-8 rounded bg-gray-400 flex items-center justify-center text-xs text-white mr-2 shrink-0`}>
-      {name[0]}
+      {name ? name[0] : "?"}
     </div>
   );
 };
@@ -81,7 +87,6 @@ export default function LostArkRefiningCalc() {
   const [resultTab, setResultTab] = useState('optimal');
   const [calcResult, setCalcResult] = useState(null);
 
-  // 귀속 재료 사용 여부 체크박스
   const [isBoundMaterialFree, setIsBoundMaterialFree] = useState(false);
 
   const breathName = equipmentType === "무기" ? "용암의 숨결" : "빙하의 숨결";
@@ -209,101 +214,91 @@ export default function LostArkRefiningCalc() {
   const currentReq = REFINE_DATA[equipmentType]?.[targetLevel] || { shard: 0, fusion: 0, leap: 0, stone: 0, gold: 0 };
   const reqBreathCount = getBreathCount(targetLevel); 
 
-  // ★ (화면 표시용) 1회 트라이 비용 단순 계산
-  // 체크박스 켜져있으면: 귀속 재료가 충분하다는 가정 하에 0원으로 표시 (사용자 기대 부응)
-  // 부족하면: 시뮬레이션 결과에서 정확히 반영되지만, 여기선 단순하게 보여줌
-  const calculateDisplayCost = (useBreath) => {
-    let cost = 0;
-    const items = [MAT_NAMES.shard, MAT_NAMES.fusion, MAT_NAMES.leap, MAT_NAMES.stone];
-    
-    items.forEach(name => {
-        let reqKey = Object.keys(MAT_NAMES).find(key => MAT_NAMES[key] === name);
-        let needed = currentReq[reqKey];
-        // 체크박스 켜져있고 보유량이 있으면(여기선 단순 0원 처리로 표시)
-        if (isBoundMaterialFree) {
-            // 보유량이 충분하면 0원, 아니면 차액 계산 등 복잡해지므로
-            // UI 표시용으로는 "귀속 재료 우선 사용 시 예상 비용"으로, 
-            // 현재 보유량 > 필요량이면 0원 처리
-            let have = boundItems[name] || 0;
-            let charge = Math.max(0, needed - have);
-            cost += charge * (prices[name] || 0);
-        } else {
-            cost += needed * (prices[name] || 0);
-        }
-    });
-
-    cost += currentReq.gold;
-    
-    if (useBreath) {
-        // 숨결도 귀속 체크? 숨결은 보통 별도지만, 여기선 필수 재료 체크박스이므로 숨결은 그대로 둠
-        // 유저 요청: "귀속 필수 재료"를 바탕으로 제외. 숨결은 선택 재료임.
-        cost += (prices[MAT_NAMES.breath] || 0) * reqBreathCount; 
-    }
-    
-    return cost;
-  };
-
-  // ★ 핵심: 시뮬레이션 함수 (귀속 재료 소진 로직 포함)
+  // 시뮬레이션 로직 (귀속 숨결 처리 포함)
   const simulateStrategy = (mixedLimit) => {
     const baseProb = BASE_PROBABILITIES[targetLevel] || 0;
     
-    // 시뮬레이션 시작 시 보유 귀속 재료 복사 (이 시뮬레이션 안에서만 소모됨)
-    // 주의: '평균'을 구하려면 이 과정을 수만 번 반복해야 정확하지만, 
-    // 여기서는 "100트까지 가는 하나의 가상 시나리오"를 비용 누적으로 계산하므로
-    // 단일 시나리오 내에서의 소모를 추적합니다.
+    // 시뮬레이션용 귀속 재료 복사 (이 함수 내에서 소모됨)
     let currentBound = { ...boundItems };
 
     let currentArtisan = 0;
     let totalCostAccumulated = 0; 
     let expectedCost = 0; 
     let cumulativeFailProb = 1; 
+    
+    // 결과 통계용 누적 객체
+    let accMats = { stone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, breath: 0 };
+    let expMats = { stone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, breath: 0 };
+
     const tableRows = [];
 
     for (let tryCount = 1; tryCount <= 100; tryCount++) {
-        // 1. 이번 트라이 비용 계산 (귀속 재료 차감 로직)
-        let tryCost = currentReq.gold; // 골드는 항상 소모
+        // 1. 이번 트라이 필요 재료 정의
+        let needed = {
+            stone: currentReq.stone,
+            leap: currentReq.leap,
+            fusion: currentReq.fusion,
+            shard: currentReq.shard,
+            gold: currentReq.gold,
+            breath: 0
+        };
 
-        // 필수 재료 4종 계산
-        const items = [MAT_NAMES.shard, MAT_NAMES.fusion, MAT_NAMES.leap, MAT_NAMES.stone];
-        items.forEach(name => {
-            let reqKey = Object.keys(MAT_NAMES).find(key => MAT_NAMES[key] === name);
-            let needed = currentReq[reqKey];
+        const isJangGiBaek = currentArtisan >= 100;
+        let shouldUseBreath = tryCount <= mixedLimit;
+        
+        // 장기백 도달 시 숨결 사용 안 함 (강제 노숨)
+        if (isJangGiBaek) shouldUseBreath = false; 
+
+        if (shouldUseBreath) {
+            needed.breath = reqBreathCount;
+        }
+
+        // 2. 비용 계산 (귀속 재료 우선 차감 로직)
+        let tryCost = 0;
+        
+        // 비용 계산 대상 항목들 (숨결 포함)
+        const costItems = ['stone', 'leap', 'fusion', 'shard', 'breath'];
+        
+        costItems.forEach(key => {
+            const name = MAT_NAMES[key];
+            const amount = needed[key];
             
-            if (isBoundMaterialFree) {
-                let have = currentBound[name] || 0;
-                if (have >= needed) {
-                    // 귀속으로 충분함 -> 비용 0, 보유량 차감
-                    currentBound[name] -= needed;
+            if (amount > 0) {
+                if (isBoundMaterialFree) {
+                    let have = currentBound[name] || 0;
+                    if (have >= amount) {
+                        currentBound[name] -= amount; // 보유량 차감, 비용 0
+                    } else {
+                        let deficit = amount - have;
+                        tryCost += deficit * (prices[name] || 0); // 부족분만 비용 청구
+                        currentBound[name] = 0; // 다 씀
+                    }
                 } else {
-                    // 부족함 -> 있는 거 다 쓰고, 나머지는 골드로 구매
-                    let deficit = needed - have;
-                    tryCost += deficit * (prices[name] || 0);
-                    currentBound[name] = 0; // 다 씀
+                    // 체크박스 안 켰으면 전액 골드 비용
+                    tryCost += amount * (prices[name] || 0);
                 }
-            } else {
-                // 체크박스 껐으면 그냥 전액 골드
-                tryCost += needed * (prices[name] || 0);
             }
         });
 
-        // 숨결 여부 및 비용
-        const isJangGiBaek = currentArtisan >= 100;
-        let shouldUseBreath = tryCount <= mixedLimit;
-        if (isJangGiBaek) shouldUseBreath = false; // 장기백은 노숨
+        // 골드는 항상 비용에 추가
+        tryCost += needed.gold;
 
-        if (shouldUseBreath) {
-            tryCost += (prices[MAT_NAMES.breath] || 0) * reqBreathCount;
-        }
+        // 3. 재료 소모량 통계 누적 (귀속 여부 상관없이 총 소모량)
+        ['stone', 'leap', 'fusion', 'shard', 'gold', 'breath'].forEach(key => {
+            const amount = needed[key];
+            accMats[key] += amount; 
+            if (!isJangGiBaek) {
+                expMats[key] += amount * cumulativeFailProb; 
+            }
+        });
 
-        // 확률 계산
+        // 4. 확률 계산 및 진행
         const failBonus = Math.min(tryCount - 1, 10) * (baseProb / 10);
         const breathBonus = shouldUseBreath ? baseProb : 0; 
         let successRate = baseProb + failBonus + breathBonus;
         if (isJangGiBaek) successRate = 100;
 
-        // 결과 누적
         totalCostAccumulated += tryCost;
-
         if (!isJangGiBaek) {
              expectedCost += tryCost * cumulativeFailProb;
         }
@@ -328,6 +323,8 @@ export default function LostArkRefiningCalc() {
     return {
         avgCost: Math.floor(expectedCost),
         artisanCost: Math.floor(totalCostAccumulated),
+        avgMats: expMats, 
+        artisanMats: accMats, 
         rows: tableRows,
         mixedLimit: mixedLimit
     };
@@ -336,7 +333,6 @@ export default function LostArkRefiningCalc() {
   const runOptimization = () => {
     setResultTab('optimal'); 
 
-    // 시뮬레이션 할 때마다 boundItems는 초기화된 상태로 시작해야 함 (simulateStrategy 내에서 복사하므로 OK)
     const noBreathResult = simulateStrategy(0);
     const fullBreathResult = simulateStrategy(100);
 
@@ -359,9 +355,47 @@ export default function LostArkRefiningCalc() {
     });
   };
 
+  // 재료 표시용 컴포넌트 (순서: 결정, 돌파, 융화, 파편, 골드, 숨결)
+  const MaterialDisplay = ({ mats }) => {
+      // 요청하신 순서대로 배열 정의
+      const displayOrder = [
+          { key: 'stone', name: MAT_NAMES.stone },
+          { key: 'leap', name: MAT_NAMES.leap },
+          { key: 'fusion', name: MAT_NAMES.fusion },
+          { key: 'shard', name: MAT_NAMES.shard },
+          { key: 'gold', name: '골드' },
+          { key: 'breath', name: MAT_NAMES.breath },
+      ];
+
+      return (
+          // 스크린샷처럼 가로로 배치 (화면 작으면 줄바꿈)
+          <div className="flex flex-wrap gap-4 mt-2">
+              {displayOrder.map(item => {
+                  const amount = mats[item.key] || 0;
+                  // 0개인 재료는 표시하지 않음 (깔끔하게)
+                  if (amount <= 0) return null;
+                  
+                  return (
+                      <div key={item.key} className="flex items-center text-xs">
+                          {/* 아이콘 */}
+                          <div className="mr-1">
+                             <ItemIcon info={itemInfos[item.name]} name={item.name} />
+                          </div>
+                          {/* 수량 */}
+                          <div className="flex flex-col">
+                              <span className="font-bold text-gray-700">
+                                  x {amount.toLocaleString(undefined, {maximumFractionDigits: 1})}
+                              </span>
+                          </div>
+                      </div>
+                  );
+              })}
+          </div>
+      );
+  };
+
   return (
     <div className="min-h-screen bg-gray-50 p-4 font-sans text-sm">
-      {/* 1. 타이틀 수정 */}
       <header className="mb-4 border-b pb-2 flex justify-between items-center">
         <h1 className="text-xl font-bold">세르카 장비 재련 효율 계산기</h1>
         <button 
@@ -451,7 +485,6 @@ export default function LostArkRefiningCalc() {
                   let count = currentReq[reqKey];
                   let cost = (prices[itemName] || 0) * count;
                   
-                  // 화면 표시용: 보유량 있으면 차감된 가격 보여주기
                   let displayCost = cost;
                   if (isBoundMaterialFree) {
                       let have = boundItems[itemName] || 0;
@@ -473,14 +506,13 @@ export default function LostArkRefiningCalc() {
               })}
                <div className="flex justify-between items-center text-xs">
                 <div className="flex items-center">
-                  <div className="w-8 h-8 rounded bg-yellow-500 flex items-center justify-center text-white font-bold mr-2 border border-yellow-600">G</div>
+                  <ItemIcon info={null} name="골드" />
                   <span>x {currentReq.gold.toLocaleString()}</span>
                 </div>
                 <span className="text-gray-500">{currentReq.gold.toLocaleString()} G</span>
               </div>
             </div>
 
-            {/* 2. 체크박스 문구 수정 */}
             <div className="mt-3 pt-3 border-t">
                 <label className="flex items-center space-x-2 cursor-pointer select-none">
                     <input 
@@ -503,7 +535,18 @@ export default function LostArkRefiningCalc() {
                  </div>
                  <div className="flex justify-between text-gray-400">
                      <span>1회 추가 비용</span>
-                     <span>{((prices[MAT_NAMES.breath]||0)*reqBreathCount).toLocaleString()} G</span>
+                     {/* 숨결 표시 비용도 귀속 여부에 따라 다르게 표시 */}
+                     <span>
+                        {(() => {
+                            let totalCost = (prices[MAT_NAMES.breath] || 0) * reqBreathCount;
+                            if (isBoundMaterialFree) {
+                                let have = boundItems[MAT_NAMES.breath] || 0;
+                                let needed = reqBreathCount;
+                                totalCost = Math.max(0, needed - have) * (prices[MAT_NAMES.breath] || 0);
+                            }
+                            return totalCost.toLocaleString();
+                        })()} G
+                     </span>
                  </div>
             </div>
 
@@ -544,6 +587,7 @@ export default function LostArkRefiningCalc() {
 
                 <div className="p-4 flex-1 flex flex-col overflow-hidden">
                     <div className="mb-4">
+                        {/* 1. 요약 박스 */}
                         {resultTab === 'optimal' && (
                             <div className="bg-indigo-50 p-4 rounded border border-indigo-200 mb-4">
                                 <h3 className="font-bold text-indigo-900 text-lg mb-1">
@@ -555,18 +599,24 @@ export default function LostArkRefiningCalc() {
                             </div>
                         )}
 
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="p-4 bg-gray-100 rounded">
-                                <h3 className="font-bold text-gray-600">평균 비용 (기댓값)</h3>
-                                <p className="text-2xl font-bold text-gray-800">
-                                    {calcResult[resultTab].avgCost.toLocaleString()} G
-                                </p>
+                        {/* 2. 재료 소모량 정보 (수정됨: 비용 폰트 키움) */}
+                        <div className="space-y-4 mb-4">
+                            {/* 평균 소모 재료 박스 */}
+                            <div className="p-4 bg-white rounded border w-full shadow-sm">
+                                <div className="flex justify-between items-end mb-3 border-b pb-2">
+                                    <h3 className="font-bold text-lg text-gray-700">평균 소모 재료 (기댓값)</h3>
+                                    <span className="text-2xl font-bold text-indigo-600">{calcResult[resultTab].avgCost.toLocaleString()} G</span>
+                                </div>
+                                <MaterialDisplay mats={calcResult[resultTab].avgMats} />
                             </div>
-                            <div className="p-4 bg-red-50 rounded">
-                                <h3 className="font-bold text-red-600">장기백 비용 (100%)</h3>
-                                <p className="text-2xl font-bold text-red-700">
-                                    {calcResult[resultTab].artisanCost.toLocaleString()} G
-                                </p>
+                            
+                            {/* 장기백 소모 재료 박스 */}
+                            <div className="p-4 bg-white rounded border w-full shadow-sm border-red-100">
+                                <div className="flex justify-between items-end mb-3 border-b border-red-100 pb-2">
+                                    <h3 className="font-bold text-lg text-red-900">장기백 소모 재료 (100%)</h3>
+                                    <span className="text-2xl font-bold text-red-600">{calcResult[resultTab].artisanCost.toLocaleString()} G</span>
+                                </div>
+                                <MaterialDisplay mats={calcResult[resultTab].artisanMats} />
                             </div>
                         </div>
                     </div>
