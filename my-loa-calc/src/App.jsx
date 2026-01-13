@@ -81,6 +81,9 @@ export default function LostArkRefiningCalc() {
   const [resultTab, setResultTab] = useState('optimal');
   const [calcResult, setCalcResult] = useState(null);
 
+  // ★ 추가: 귀속 재료 0골드 계산 여부 체크박스 상태
+  const [isBoundMaterialFree, setIsBoundMaterialFree] = useState(false);
+
   const breathName = equipmentType === "무기" ? "용암의 숨결" : "빙하의 숨결";
 
   const getBreathCount = (level) => {
@@ -206,17 +209,31 @@ export default function LostArkRefiningCalc() {
   const currentReq = REFINE_DATA[equipmentType]?.[targetLevel] || { shard: 0, fusion: 0, leap: 0, stone: 0, gold: 0 };
   const reqBreathCount = getBreathCount(targetLevel); 
 
+  // ★ 수정: 1회 트라이 비용 계산 (귀속 재료 체크 여부 반영)
   const calculateOneTryCost = (useBreath) => {
-    let cost = 
-      (prices[MAT_NAMES.shard] || 0) * currentReq.shard +
-      (prices[MAT_NAMES.fusion] || 0) * currentReq.fusion +
-      (prices[MAT_NAMES.leap] || 0) * currentReq.leap +
-      (prices[MAT_NAMES.stone] || 0) * currentReq.stone +
-      currentReq.gold;
+    let cost = 0;
+
+    // 1. 재료 비용 (파편, 융화, 돌파석, 결정)
+    // 체크박스가 켜져 있으면(true), 재료비는 0원 처리
+    if (!isBoundMaterialFree) {
+      cost += (prices[MAT_NAMES.shard] || 0) * currentReq.shard;
+      cost += (prices[MAT_NAMES.fusion] || 0) * currentReq.fusion;
+      cost += (prices[MAT_NAMES.leap] || 0) * currentReq.leap;
+      cost += (prices[MAT_NAMES.stone] || 0) * currentReq.stone;
+    }
+
+    // 2. 골드 비용 (항상 포함)
+    cost += currentReq.gold;
     
+    // 3. 숨결 비용 (풀숨일 경우)
+    // 숨결은 '귀속 재료' 체크박스와 별개로 볼 수도 있지만, 보통 재료 0원 체크 시 숨결도 있으면 쓴다고 가정할 수 있음.
+    // 하지만 "필수 재료"가 아니므로 숨결 값은 그대로 두는 경우가 많음. (여기서는 유저 요청 "필수 재료를 0골드로"에 집중)
+    // 만약 숨결도 귀속으로 처리하고 싶다면 여기에도 !isBoundMaterialFree 조건을 걸면 됨.
+    // 일단 '필수 재료'만 0원으로 처리하는 로직 유지 (숨결은 선택 재료이므로)
     if (useBreath) {
         cost += (prices[MAT_NAMES.breath] || 0) * reqBreathCount; 
     }
+    
     return cost;
   };
 
@@ -233,13 +250,12 @@ export default function LostArkRefiningCalc() {
     const tableRows = [];
 
     for (let tryCount = 1; tryCount <= 100; tryCount++) {
-        // 장기백(천장) 도달 여부 확인
-        // ★ 중요 수정: 장인의 기운이 100% 이상이면 무조건 성공 처리 (시스템상 재료 소모는 노숨 기준)
+        // 장인의 기운 100% 도달 시 -> 강제 성공 (재료비는 노숨 비용으로 소모한다고 가정)
         const isJangGiBaek = currentArtisan >= 100;
         
         let shouldUseBreath = tryCount <= mixedLimit;
         if (isJangGiBaek) {
-            shouldUseBreath = false; // 장기백 턴은 숨결 사용 불가
+            shouldUseBreath = false; 
         }
         
         const failBonus = Math.min(tryCount - 1, 10) * (baseProb / 10);
@@ -402,7 +418,10 @@ export default function LostArkRefiningCalc() {
                         <ItemIcon info={itemInfos[itemName]} name={itemName} />
                         <span>x {count.toLocaleString()}</span>
                         </div>
-                        <span className="text-gray-500">{cost.toLocaleString(undefined, {maximumFractionDigits: 0})} G</span>
+                        {/* 귀속 재료 0원 체크 시 취소선 표시 등 시각적 효과를 줄 수도 있음 */}
+                        <span className={`text-gray-500 ${isBoundMaterialFree ? 'line-through text-gray-300' : ''}`}>
+                            {cost.toLocaleString(undefined, {maximumFractionDigits: 0})} G
+                        </span>
                     </div>
                   )
               })}
@@ -413,6 +432,19 @@ export default function LostArkRefiningCalc() {
                 </div>
                 <span className="text-gray-500">{currentReq.gold.toLocaleString()} G</span>
               </div>
+            </div>
+
+            {/* ★ 추가: 귀속 재료 무료 체크박스 */}
+            <div className="mt-3 pt-3 border-t">
+                <label className="flex items-center space-x-2 cursor-pointer select-none">
+                    <input 
+                        type="checkbox" 
+                        checked={isBoundMaterialFree} 
+                        onChange={(e) => setIsBoundMaterialFree(e.target.checked)}
+                        className="w-4 h-4 text-indigo-600 rounded"
+                    />
+                    <span className="text-xs font-bold text-gray-700">귀속 필수 재료를 0골드로 계산</span>
+                </label>
             </div>
 
             <div className="mt-4 pt-3 border-t text-xs text-gray-600">
