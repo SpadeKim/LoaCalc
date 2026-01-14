@@ -1,13 +1,21 @@
 import React, { useState, useEffect } from 'react';
 
-const API_KEY = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyIsImtpZCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyJ9.eyJpc3MiOiJodHRwczovL2x1ZHkuZ2FtZS5vbnN0b3ZlLmNvbSIsImF1ZCI6Imh0dHBzOi8vbHVkeS5nYW1lLm9uc3RvdmUuY29tL3Jlc291cmNlcyIsImNsaWVudF9pZCI6IjEwMDAwMDAwMDAzMjMxOTYifQ.nxAftR5TwFQLido8LhWsy8GSEB0d6v266tHgvaPQjo4YyMBSUKIU4HykviDzw_A2_f2T9GWEWxTBP6vyDYlVgIRu-z_aZCucRdMn8joW-FLbeG0YxVYX4st-CFy30uvo0PfhQ2PoYSTCNQoqxm8MF8isxEK7e8-BgP86Gwk8tdfhtjdegU--MB3thiBbSdCLlYCNVD7uBWRxULpV42VaC3kWdnRVxs3goVwpisAC4OtZFlosw-SR_obN0pG3ZssgVdxsOyjqbOydinvUWDXCG-ISfcQ-DuEQHeewzfvP2flgfCBAAk-DezZYLUt0Fkdf9tJqirbjaskv4oH656FVxw";
+// ★ 재료 이름 정의 (최상단)
+const MAT_NAMES = {
+  stone: "결정", 
+  leap: "위대한 운명의 돌파석",
+  fusion: "상급 아비도스 융화 재료",
+  shard: "운명의 파편",
+  breath: "숨결",
+  gold: "골드"
+};
 
 const GRADE_BG = {
   '일반': 'bg-gray-500', '고급': 'bg-green-600', '희귀': 'bg-blue-500',
   '영웅': 'bg-purple-600', '전설': 'bg-orange-500', '유물': 'bg-red-600', '고대': 'bg-yellow-100',
 };
 
-// ★ 요청하신 대로 원복된 확률 데이터
+// 원본 확률 데이터 (12~25)
 const BASE_PROBABILITIES = {
   12: 5.0, 13: 5.0, 14: 4.0, 15: 4.0, 16: 4.0,
   17: 3.0, 18: 3.0, 19: 3.0, 20: 1.5, 21: 1.5,
@@ -76,23 +84,17 @@ const ItemIcon = ({ info, name }) => {
 };
 
 export default function LostArkRefiningCalc() {
-  // ★ 에러 수정: MAT_NAMES를 컴포넌트 최상단에 정의
-  const MAT_NAMES = {
-    stone: "결정", 
-    leap: "위대한 운명의 돌파석",
-    fusion: "상급 아비도스 융화 재료",
-    shard: "운명의 파편",
-    breath: "숨결",
-    gold: "골드"
-  };
-
   const [equipTab, setEquipTab] = useState('simple');
 
   const [simpleEquipmentType, setSimpleEquipmentType] = useState("방어구");
-  const [simpleTargetLevel, setSimpleTargetLevel] = useState(12); // 목표 단계
+  const [simpleTargetLevel, setSimpleTargetLevel] = useState(12);
 
   const [addedProb, setAddedProb] = useState(0); 
   const [currentArtisan, setCurrentArtisan] = useState(0); 
+
+  // 일괄 변경 상태
+  const [isBatchStart, setIsBatchStart] = useState(false);
+  const [isBatchEnd, setIsBatchEnd] = useState(false);
 
   // 초기값: 11->12 설정
   const [detailSettings, setDetailSettings] = useState({
@@ -141,10 +143,11 @@ export default function LostArkRefiningCalc() {
         "운명의 파편 주머니(대)", "상급 아비도스 융화 재료", "운명의 수호석 결정",
         "운명의 파괴석 결정", "위대한 운명의 돌파석", "용암의 숨결", "빙하의 숨결"
       ];
+      // API 경로: 로컬 서버리스 함수 (/api/market) 사용
       const requests = targetItemList.map(itemName => 
-        fetch('/api/markets/items', {
+        fetch('/api/market', {
           method: 'POST',
-          headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ Sort: "CURRENT_MIN_PRICE", CategoryCode: 50000, ItemTier: 0, ItemName: itemName, PageNo: 1, SortCondition: "ASC" })
         }).then(res => res.json())
       );
@@ -187,21 +190,56 @@ export default function LostArkRefiningCalc() {
 
   const handleDetailChange = (part, field, value) => {
     setDetailSettings(prev => {
-        const newVal = { ...prev[part], [field]: value };
-        if (field === 'start' && newVal.end < value) newVal.end = Number(value) + 1;
-        return { ...prev, [part]: newVal };
+        const newSettings = { ...prev };
+        
+        const updatePart = (p, f, v) => {
+            newSettings[p] = { ...newSettings[p], [f]: v };
+            if (f === 'start' && newSettings[p].end < v) {
+                newSettings[p].end = Number(v) + 1;
+            }
+        };
+
+        if (field === 'start' && isBatchStart) {
+            Object.keys(newSettings).forEach(key => {
+                if (newSettings[key].active) {
+                    updatePart(key, 'start', value);
+                }
+            });
+        }
+        else if (field === 'end' && isBatchEnd) {
+            Object.keys(newSettings).forEach(key => {
+                 if (newSettings[key].active) {
+                    updatePart(key, 'end', value);
+                }
+            });
+        }
+        else {
+            updatePart(part, field, value);
+        }
+
+        return newSettings;
     });
   };
+
+  const handleSelectAll = () => {
+      setDetailSettings(prev => {
+          const next = { ...prev };
+          Object.keys(next).forEach(key => next[key].active = true);
+          return next;
+      });
+  };
+  const handleDeselectAll = () => {
+      setDetailSettings(prev => {
+          const next = { ...prev };
+          Object.keys(next).forEach(key => next[key].active = false);
+          return next;
+      });
+  };
+
 
   useEffect(() => { fetchMarketPrices(); }, []);
 
   const simulateOneStep = (level, type, mixedLimit, currentBound, initialProbBonus = 0, initialArtisanPercent = 0) => {
-    // ★ 로직 수정: 11->12를 가려면 key '12' 데이터를 써야 함.
-    // 사용자는 '11'을 선택했지만, 데이터는 '12'부터 있음. 
-    // 로직: level은 '목표 단계'를 의미하도록 호출부에서 조정하거나 여기서 조정.
-    // 여기서 level 인자는 REFINE_DATA의 Key로 사용됨. 
-    // 따라서 11->12 시뮬레이션 시에는 level 12가 들어와야 함.
-    
     const currentReq = REFINE_DATA[type]?.[level] || { shard: 0, fusion: 0, leap: 0, stone: 0, gold: 0 };
     const reqBreathCount = getBreathCount(level); 
     const baseProb = BASE_PROBABILITIES[level] || 0;
@@ -311,7 +349,6 @@ export default function LostArkRefiningCalc() {
     let tasks = [];
 
     if (equipTab === 'simple') {
-        // 간편: 목표 단계 1개. (Start = Target - 1)
         const start = simpleTargetLevel - 1;
         tasks.push({
             name: simpleEquipmentType,
@@ -345,7 +382,7 @@ export default function LostArkRefiningCalc() {
     let batchResult = {
         optimal: { avgCost: 0, artisanCost: 0, avgMats: initMats(), artisanMats: initMats(), summaryRows: [] },
         no:      { avgCost: 0, artisanCost: 0, avgMats: initMats(), artisanMats: initMats(), summaryRows: [] },
-        full:    { avgCost: 0, artisanCost: 0, avgMats: initMats(), artisanMats: initMats(), summaryRows: [] },
+        full: { avgCost: 0, artisanCost: 0, avgMats: initMats(), artisanMats: initMats(), summaryRows: [] },
         isBatch: totalSteps > 1 
     };
 
@@ -358,9 +395,6 @@ export default function LostArkRefiningCalc() {
     let isFirstStepProcessed = false;
 
     tasks.forEach(task => {
-        // ★ loop: start+1 부터 end 까지.
-        // 예: Start 11, End 12 -> loop 12. (12강 트라이)
-        // 예: Start 11, End 13 -> loop 12, 13.
         for (let lvl = task.start + 1; lvl <= task.end; lvl++) {
             
             const useUserInput = (equipTab === 'simple') && !isFirstStepProcessed;
@@ -394,7 +428,7 @@ export default function LostArkRefiningCalc() {
                     target.artisanMats[key] += source.artisanMats[key] * count;
                 });
                 target.summaryRows.push({
-                    desc: `${task.name} ${lvl-1}→${lvl}`, // 표시: 11->12
+                    desc: `${task.name} ${lvl-1}→${lvl}`, 
                     strategy: label,
                     limit: limit,
                     avgCost: source.avgCost,
@@ -431,7 +465,7 @@ export default function LostArkRefiningCalc() {
                   if (amount <= 0) return null;
                   
                   let displayIconName = item.name;
-                  if (item.key === 'breath') displayIconName = "용암의 숨결"; // 아이콘용
+                  if (item.key === 'breath') displayIconName = "용암의 숨결"; 
 
                   return (
                       <div key={item.key} className="flex items-center text-xs">
@@ -449,7 +483,6 @@ export default function LostArkRefiningCalc() {
   };
 
   const renderPreviewMaterials = () => {
-      // ★ 여러 부위 강화 탭일 때 비활성화
       if (equipTab === 'detail') {
           return (
               <div className="text-center py-8 text-gray-500 text-sm bg-gray-50 rounded border border-gray-200">
@@ -458,9 +491,7 @@ export default function LostArkRefiningCalc() {
           );
       }
 
-      // 간편 모드: 목표 단계 1회 비용 (즉, Target 레벨의 트라이 비용)
-      const currentLevel = simpleTargetLevel; // 단순 목표 레벨 기준 데이터
-      // 데이터는 해당 레벨로 가는 비용이므로 key = simpleTargetLevel
+      const currentLevel = simpleTargetLevel; 
       const req = REFINE_DATA[simpleEquipmentType]?.[currentLevel] || { gold: 0 };
       const breath = getBreathCount(currentLevel);
       
@@ -600,123 +631,153 @@ export default function LostArkRefiningCalc() {
                         </select>
                     </div>
                     
-                   {/* 확률 정보 입력 (동적 스텝 및 % 디자인 적용) */}
-            <div className="space-y-2 pt-2 border-t mt-2">
-                {/* 렌더링 시점에 기본 확률과 스텝 계산 */}
-                {(() => {
-                    // 현재 목표 단계의 직전 단계 확률 (즉, 트라이할 단계의 확률)
-                    const baseProb = BASE_PROBABILITIES[simpleTargetLevel] || 0;
-                    // 1틱당 변화량 = 기본확률 / 10 (예: 5% -> 0.5, 1.5% -> 0.15)
-                    const stepValue = baseProb / 10; 
+                    <div className="space-y-2 pt-2 border-t mt-2">
+                        {(() => {
+                            const baseProb = BASE_PROBABILITIES[simpleTargetLevel - 1] || 0;
+                            const stepValue = baseProb / 10; 
 
-                    return (
-                        <>
-                            <div>
-                                <label className="block text-gray-500 text-xs mb-1">기본 확률</label>
-                                <div className="relative">
-                                    <input 
-                                        type="text" 
-                                        className="w-full border rounded p-2 text-right bg-gray-100 text-gray-600 pr-8" 
-                                        value={`${baseProb}`} 
-                                        readOnly
-                                    />
-                                    <span className="absolute right-3 top-2.5 text-gray-400 text-xs select-none">%</span>
-                                </div>
-                            </div>
+                            return (
+                                <>
+                                    <div>
+                                        <label className="block text-gray-500 text-xs mb-1">기본 확률</label>
+                                        <div className="relative">
+                                            <input 
+                                                type="text" 
+                                                className="w-full border rounded p-2 text-right bg-gray-100 text-gray-600 pr-8" 
+                                                value={`${baseProb}`} 
+                                                readOnly
+                                            />
+                                            <span className="absolute right-3 top-2.5 text-gray-400 text-xs select-none">%</span>
+                                        </div>
+                                    </div>
 
-                            <div>
-                                <label className="block text-gray-500 text-xs mb-1">실패로 추가된 확률</label>
-                                <div className="relative">
-                                    <input 
-                                        type="number" 
-                                        className="w-full border rounded p-2 text-right pr-8" 
-                                        value={addedProb} 
-                                        step={stepValue} // ★ 핵심: 동적 스텝 적용
-                                        onChange={(e) => {
-                                            let val = parseFloat(e.target.value);
-                                            if (isNaN(val) || val < 0) val = 0;
-                                            
-                                            // 최대치 제한 (기본 확률까지만)
-                                            if (val > baseProb) val = baseProb;
-                                            
-                                            // 소수점 자릿수 처리 (부동소수점 오차 방지)
-                                            // stepValue의 소수점 자릿수만큼만 유지
-                                            const decimals = (stepValue.toString().split('.')[1] || []).length;
-                                            val = parseFloat(val.toFixed(decimals));
+                                    <div>
+                                        <label className="block text-gray-500 text-xs mb-1">실패로 추가된 확률</label>
+                                        <div className="relative">
+                                            <input 
+                                                type="number" 
+                                                className="w-full border rounded p-2 text-right pr-8" 
+                                                value={addedProb} 
+                                                step={stepValue} 
+                                                onChange={(e) => {
+                                                    let val = parseFloat(e.target.value);
+                                                    if (isNaN(val) || val < 0) val = 0;
+                                                    if (val > baseProb) val = baseProb;
+                                                    const decimals = (stepValue.toString().split('.')[1] || []).length;
+                                                    val = parseFloat(val.toFixed(decimals));
+                                                    setAddedProb(val);
+                                                }}
+                                                placeholder="0"
+                                            />
+                                            <span className="absolute right-3 top-2.5 text-gray-400 text-xs select-none">%</span>
+                                        </div>
+                                        <p className="text-[10px] text-gray-400 text-right mt-1">
+                                            * 최대 {baseProb}%까지
+                                        </p>
+                                    </div>
 
-                                            setAddedProb(val);
-                                        }}
-                                        placeholder="0"
-                                    />
-                                    <span className="absolute right-3 top-2.5 text-gray-400 text-xs select-none">%</span>
-                                </div>
-                                <p className="text-[10px] text-gray-400 text-right mt-1">
-                                    * 최대 {baseProb}%까지 (1회 실패당 +{stepValue}%)
-                                </p>
-                            </div>
-
-                            <div>
-                                <label className="block text-gray-500 text-xs mb-1">현재 장기백</label>
-                                <div className="relative">
-                                    <input 
-                                        type="number" 
-                                        className="w-full border rounded p-2 text-right pr-8" 
-                                        value={currentArtisan} 
-                                        onChange={(e) => {
-                                            let val = parseFloat(e.target.value);
-                                            if (isNaN(val) || val < 0) val = 0;
-                                            if (val > 100) val = 100; // 100% 초과 금지
-                                            setCurrentArtisan(val);
-                                        }}
-                                        placeholder="0"
-                                    />
-                                    <span className="absolute right-3 top-2.5 text-gray-400 text-xs select-none">%</span>
-                                </div>
-                            </div>
-                        </>
-                    );
-                })()}
-            </div>
+                                    <div>
+                                        <label className="block text-gray-500 text-xs mb-1">현재 장기백</label>
+                                        <div className="relative">
+                                            <input 
+                                                type="number" 
+                                                className="w-full border rounded p-2 text-right pr-8" 
+                                                value={currentArtisan} 
+                                                onChange={(e) => {
+                                                    let val = parseFloat(e.target.value);
+                                                    if (isNaN(val) || val < 0) val = 0;
+                                                    if (val > 100) val = 100; 
+                                                    setCurrentArtisan(val);
+                                                }}
+                                                placeholder="0"
+                                            />
+                                            <span className="absolute right-3 top-2.5 text-gray-400 text-xs select-none">%</span>
+                                        </div>
+                                    </div>
+                                </>
+                            );
+                        })()}
+                    </div>
                 </div>
             ) : (
-                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
-                    {Object.entries(detailSettings).map(([key, setting]) => (
-                        <div key={key} className={`flex items-center gap-1 p-2 rounded border ${setting.active ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 border-gray-200'}`}>
-                            <input 
-                                type="checkbox" 
-                                checked={setting.active} 
-                                onChange={(e) => handleDetailChange(key, 'active', e.target.checked)}
-                                className="w-4 h-4 text-indigo-600 rounded"
-                            />
-                            <span className={`text-xs font-bold w-8 ${setting.active ? 'text-gray-800' : 'text-gray-400'}`}>{setting.name}</span>
-                            
-                            <select 
-                                className="w-14 text-xs border rounded p-1" 
-                                value={setting.start} 
-                                disabled={!setting.active}
-                                onChange={(e) => handleDetailChange(key, 'start', Number(e.target.value))}
-                            >
-                                {[...Array(14)].map((_, i) => {
-                                    const lvl = i + 11;
-                                    if (lvl > 24) return null;
-                                    return <option key={lvl} value={lvl}>{lvl}</option>
-                                })}
-                            </select>
-                            <span className="text-gray-400">→</span>
-                            <select 
-                                className="w-14 text-xs border rounded p-1" 
-                                value={setting.end} 
-                                disabled={!setting.active}
-                                onChange={(e) => handleDetailChange(key, 'end', Number(e.target.value))}
-                            >
-                                {[...Array(14)].map((_, i) => {
-                                    const lvl = i + 12;
-                                    if (lvl <= setting.start) return null;
-                                    return <option key={lvl} value={lvl}>{lvl}</option>
-                                })}
-                            </select>
+                /* ★ 여러 부위 강화 UI (버튼형 토글 + Grid 적용) */
+                <div className="flex flex-col h-full">
+                    {/* 상단 컨트롤 영역 */}
+                    <div className="mb-2 space-y-2 pb-2 border-b">
+                        {/* 1행: 전체 선택 / 해제 */}
+                        <div className="grid grid-cols-2 gap-2">
+                             <button onClick={handleSelectAll} className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs py-2 rounded border font-bold transition">
+                                전체 선택
+                             </button>
+                             <button onClick={handleDeselectAll} className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs py-2 rounded border font-bold transition">
+                                전체 해제
+                             </button>
                         </div>
-                    ))}
+
+                        {/* 2행: 일괄 변경 토글 버튼 */}
+                        <div className="grid grid-cols-2 gap-2">
+                             <button 
+                                onClick={() => setIsBatchStart(!isBatchStart)} 
+                                className={`text-xs py-2 rounded border font-bold transition ${
+                                    isBatchStart 
+                                    ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700' 
+                                    : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                                }`}
+                             >
+                                 시작 단계 일괄 {isBatchStart ? 'ON' : 'OFF'}
+                             </button>
+                             <button 
+                                onClick={() => setIsBatchEnd(!isBatchEnd)} 
+                                className={`text-xs py-2 rounded border font-bold transition ${
+                                    isBatchEnd 
+                                    ? 'bg-blue-600 text-white border-blue-600 hover:bg-blue-700' 
+                                    : 'bg-gray-100 text-gray-500 border-gray-200 hover:bg-gray-200'
+                                }`}
+                             >
+                                 목표 단계 일괄 {isBatchEnd ? 'ON' : 'OFF'}
+                             </button>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                        {Object.entries(detailSettings).map(([key, setting]) => (
+                            <div key={key} className={`flex items-center gap-1 p-2 rounded border ${setting.active ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 border-gray-200'}`}>
+                                <input 
+                                    type="checkbox" 
+                                    checked={setting.active} 
+                                    onChange={(e) => handleDetailChange(key, 'active', e.target.checked)}
+                                    className="w-4 h-4 text-indigo-600 rounded"
+                                />
+                                <span className={`text-xs font-bold w-8 ${setting.active ? 'text-gray-800' : 'text-gray-400'}`}>{setting.name}</span>
+                                
+                                <select 
+                                    className="w-14 text-xs border rounded p-1" 
+                                    value={setting.start} 
+                                    disabled={!setting.active}
+                                    onChange={(e) => handleDetailChange(key, 'start', Number(e.target.value))}
+                                >
+                                    {[...Array(14)].map((_, i) => {
+                                        const lvl = i + 11;
+                                        if (lvl > 24) return null;
+                                        return <option key={lvl} value={lvl}>{lvl}</option>
+                                    })}
+                                </select>
+                                <span className="text-gray-400">→</span>
+                                <select 
+                                    className="w-14 text-xs border rounded p-1" 
+                                    value={setting.end} 
+                                    disabled={!setting.active}
+                                    onChange={(e) => handleDetailChange(key, 'end', Number(e.target.value))}
+                                >
+                                    {[...Array(14)].map((_, i) => {
+                                        const lvl = i + 12;
+                                        if (lvl <= setting.start) return null;
+                                        return <option key={lvl} value={lvl}>{lvl}</option>
+                                    })}
+                                </select>
+                            </div>
+                        ))}
+                    </div>
                 </div>
             )}
           </div>
