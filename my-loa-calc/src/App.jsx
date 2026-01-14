@@ -3,22 +3,15 @@ import React, { useState, useEffect } from 'react';
 const API_KEY = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyIsImtpZCI6IktYMk40TkRDSTJ5NTA5NWpjTWk5TllqY2lyZyJ9.eyJpc3MiOiJodHRwczovL2x1ZHkuZ2FtZS5vbnN0b3ZlLmNvbSIsImF1ZCI6Imh0dHBzOi8vbHVkeS5nYW1lLm9uc3RvdmUuY29tL3Jlc291cmNlcyIsImNsaWVudF9pZCI6IjEwMDAwMDAwMDAzMjMxOTYifQ.nxAftR5TwFQLido8LhWsy8GSEB0d6v266tHgvaPQjo4YyMBSUKIU4HykviDzw_A2_f2T9GWEWxTBP6vyDYlVgIRu-z_aZCucRdMn8joW-FLbeG0YxVYX4st-CFy30uvo0PfhQ2PoYSTCNQoqxm8MF8isxEK7e8-BgP86Gwk8tdfhtjdegU--MB3thiBbSdCLlYCNVD7uBWRxULpV42VaC3kWdnRVxs3goVwpisAC4OtZFlosw-SR_obN0pG3ZssgVdxsOyjqbOydinvUWDXCG-ISfcQ-DuEQHeewzfvP2flgfCBAAk-DezZYLUt0Fkdf9tJqirbjaskv4oH656FVxw";
 
 const GRADE_BG = {
-  '일반': 'bg-gray-500',
-  '고급': 'bg-green-600',
-  '희귀': 'bg-blue-500',
-  '영웅': 'bg-purple-600',
-  '전설': 'bg-orange-500',
-  '유물': 'bg-red-600',
-  '고대': 'bg-yellow-100', 
+  '일반': 'bg-gray-500', '고급': 'bg-green-600', '희귀': 'bg-blue-500',
+  '영웅': 'bg-purple-600', '전설': 'bg-orange-500', '유물': 'bg-red-600', '고대': 'bg-yellow-100',
 };
 
+// ★ 요청하신 대로 원복된 확률 데이터
 const BASE_PROBABILITIES = {
-  12: 5.0, 13: 5.0, 
-  14: 4.0, 15: 4.0, 16: 4.0, 
-  17: 3.0, 18: 3.0, 19: 3.0, 
-  20: 1.5, 21: 1.5,
-  22: 1.0, 23: 1.0, 
-  24: 0.5, 25: 0.5
+  12: 5.0, 13: 5.0, 14: 4.0, 15: 4.0, 16: 4.0,
+  17: 3.0, 18: 3.0, 19: 3.0, 20: 1.5, 21: 1.5,
+  22: 1.0, 23: 1.0, 24: 0.5, 25: 0.5
 };
 
 const REFINE_DATA = {
@@ -56,12 +49,17 @@ const REFINE_DATA = {
   }
 };
 
+const getBreathCount = (level) => {
+  if (level >= 12 && level <= 16) return 20;
+  if (level >= 17 && level <= 23) return 25;
+  if (level >= 24 && level <= 25) return 50;
+  return 0;
+};
+
 const ItemIcon = ({ info, name }) => {
-  // 골드는 이미지 경로 직접 지정 (public 폴더에 골드.png 필요)
   if (name === "골드") {
       return <img src="/골드.png" alt="골드" className="w-8 h-8 rounded mr-2 shrink-0 border border-gray-400 bg-gray-800" />;
   }
-
   if (info && info.icon) {
     const bgClass = GRADE_BG[info.grade] || 'bg-gray-700';
     return (
@@ -70,7 +68,6 @@ const ItemIcon = ({ info, name }) => {
       </div>
     );
   }
-  
   return (
     <div className={`w-8 h-8 rounded bg-gray-400 flex items-center justify-center text-xs text-white mr-2 shrink-0`}>
       {name ? name[0] : "?"}
@@ -79,33 +76,40 @@ const ItemIcon = ({ info, name }) => {
 };
 
 export default function LostArkRefiningCalc() {
-  const [equipmentType, setEquipmentType] = useState("방어구");
-  const [targetLevel, setTargetLevel] = useState(12);
+  // ★ 에러 수정: MAT_NAMES를 컴포넌트 최상단에 정의
+  const MAT_NAMES = {
+    stone: "결정", 
+    leap: "위대한 운명의 돌파석",
+    fusion: "상급 아비도스 융화 재료",
+    shard: "운명의 파편",
+    breath: "숨결",
+    gold: "골드"
+  };
+
+  const [equipTab, setEquipTab] = useState('simple');
+
+  const [simpleEquipmentType, setSimpleEquipmentType] = useState("방어구");
+  const [simpleTargetLevel, setSimpleTargetLevel] = useState(12); // 목표 단계
+
+  const [addedProb, setAddedProb] = useState(0); 
+  const [currentArtisan, setCurrentArtisan] = useState(0); 
+
+  // 초기값: 11->12 설정
+  const [detailSettings, setDetailSettings] = useState({
+    weapon:   { name: '무기', type: '무기', active: true, start: 11, end: 12 },
+    head:     { name: '머리', type: '방어구', active: true, start: 11, end: 12 },
+    shoulders:{ name: '견갑', type: '방어구', active: true, start: 11, end: 12 },
+    chest:    { name: '상의', type: '방어구', active: true, start: 11, end: 12 },
+    pants:    { name: '하의', type: '방어구', active: true, start: 11, end: 12 },
+    gloves:   { name: '장갑', type: '방어구', active: true, start: 11, end: 12 },
+  });
+
   const [isLoading, setIsLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('price');
   
   const [resultTab, setResultTab] = useState('optimal');
   const [calcResult, setCalcResult] = useState(null);
-
   const [isBoundMaterialFree, setIsBoundMaterialFree] = useState(false);
-
-  const breathName = equipmentType === "무기" ? "용암의 숨결" : "빙하의 숨결";
-
-  const getBreathCount = (level) => {
-    if (level >= 12 && level <= 19) return 20;
-    if (level >= 20 && level <= 23) return 25;
-    if (level >= 24 && level <= 25) return 50;
-    return 0;
-  };
-
-  const MAT_NAMES = {
-    shard: "운명의 파편",
-    fusion: "상급 아비도스 융화 재료", 
-    leap: "위대한 운명의 돌파석", 
-    stone: equipmentType === "방어구" ? "운명의 수호석 결정" : "운명의 파괴석 결정",
-    breath: breathName,
-    gold: "골드"
-  };
 
   const [prices, setPrices] = useState({
     "운명의 파편": 0.05, 
@@ -132,47 +136,26 @@ export default function LostArkRefiningCalc() {
   const fetchMarketPrices = async () => {
     setIsLoading(true);
     setActiveTab('price'); 
-
     try {
       const targetItemList = [
-        "운명의 파편 주머니(대)",
-        "상급 아비도스 융화 재료",
-        "운명의 수호석 결정",
-        "운명의 파괴석 결정",
-        "위대한 운명의 돌파석",
-        "용암의 숨결",
-        "빙하의 숨결"
+        "운명의 파편 주머니(대)", "상급 아비도스 융화 재료", "운명의 수호석 결정",
+        "운명의 파괴석 결정", "위대한 운명의 돌파석", "용암의 숨결", "빙하의 숨결"
       ];
-
       const requests = targetItemList.map(itemName => 
         fetch('/api/markets/items', {
           method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${API_KEY}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            Sort: "CURRENT_MIN_PRICE",
-            CategoryCode: 50000, 
-            ItemTier: 0,
-            ItemName: itemName,
-            PageNo: 1,
-            SortCondition: "ASC",
-          })
+          headers: { 'Authorization': `Bearer ${API_KEY}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ Sort: "CURRENT_MIN_PRICE", CategoryCode: 50000, ItemTier: 0, ItemName: itemName, PageNo: 1, SortCondition: "ASC" })
         }).then(res => res.json())
       );
-
       const results = await Promise.all(requests);
-      
       const newPrices = { ...prices };
       const newItemInfos = { ...itemInfos };
-
+      
       results.forEach((data, index) => {
         const searchedName = targetItemList[index];
-        
         if (data.Items && data.Items.length > 0) {
           const itemData = data.Items[0];
-          
           if (searchedName === "운명의 파편 주머니(대)") {
             newPrices["운명의 파편"] = parseFloat((itemData.CurrentMinPrice / 3000).toFixed(4));
             newItemInfos["운명의 파편"] = { icon: itemData.Icon, grade: itemData.Grade };
@@ -188,10 +171,8 @@ export default function LostArkRefiningCalc() {
           }
         }
       });
-
       setPrices(newPrices);
       setItemInfos(newItemInfos);
-
     } catch (error) {
       console.error(error);
       alert(`에러 발생: ${error.message}`);
@@ -201,113 +182,110 @@ export default function LostArkRefiningCalc() {
   };
 
   const handleBoundItemChange = (name, value) => {
-    setBoundItems(prev => ({
-      ...prev,
-      [name]: Number(value)
-    }));
+    setBoundItems(prev => ({ ...prev, [name]: Number(value) }));
   };
 
-  useEffect(() => {
-    fetchMarketPrices();
-  }, []);
+  const handleDetailChange = (part, field, value) => {
+    setDetailSettings(prev => {
+        const newVal = { ...prev[part], [field]: value };
+        if (field === 'start' && newVal.end < value) newVal.end = Number(value) + 1;
+        return { ...prev, [part]: newVal };
+    });
+  };
 
-  const currentReq = REFINE_DATA[equipmentType]?.[targetLevel] || { shard: 0, fusion: 0, leap: 0, stone: 0, gold: 0 };
-  const reqBreathCount = getBreathCount(targetLevel); 
+  useEffect(() => { fetchMarketPrices(); }, []);
 
-  // 시뮬레이션 로직 (귀속 숨결 처리 포함)
-  const simulateStrategy = (mixedLimit) => {
-    const baseProb = BASE_PROBABILITIES[targetLevel] || 0;
+  const simulateOneStep = (level, type, mixedLimit, currentBound, initialProbBonus = 0, initialArtisanPercent = 0) => {
+    // ★ 로직 수정: 11->12를 가려면 key '12' 데이터를 써야 함.
+    // 사용자는 '11'을 선택했지만, 데이터는 '12'부터 있음. 
+    // 로직: level은 '목표 단계'를 의미하도록 호출부에서 조정하거나 여기서 조정.
+    // 여기서 level 인자는 REFINE_DATA의 Key로 사용됨. 
+    // 따라서 11->12 시뮬레이션 시에는 level 12가 들어와야 함.
     
-    // 시뮬레이션용 귀속 재료 복사 (이 함수 내에서 소모됨)
-    let currentBound = { ...boundItems };
+    const currentReq = REFINE_DATA[type]?.[level] || { shard: 0, fusion: 0, leap: 0, stone: 0, gold: 0 };
+    const reqBreathCount = getBreathCount(level); 
+    const baseProb = BASE_PROBABILITIES[level] || 0;
+    
+    const isWeapon = type === "무기";
+    const stoneName = isWeapon ? "운명의 파괴석 결정" : "운명의 수호석 결정";
+    const breathName = isWeapon ? "용암의 숨결" : "빙하의 숨결";
 
-    let currentArtisan = 0;
+    let currentArtisanPercent = initialArtisanPercent; 
     let totalCostAccumulated = 0; 
     let expectedCost = 0; 
     let cumulativeFailProb = 1; 
     
-    // 결과 통계용 누적 객체
-    let accMats = { stone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, breath: 0 };
-    let expMats = { stone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, breath: 0 };
-
+    let accMats = { weaponStone: 0, armorStone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, breath: 0 };
+    let expMats = { weaponStone: 0, armorStone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, breath: 0 };
     const tableRows = [];
 
     for (let tryCount = 1; tryCount <= 100; tryCount++) {
-        // 1. 이번 트라이 필요 재료 정의
         let needed = {
-            stone: currentReq.stone,
-            leap: currentReq.leap,
-            fusion: currentReq.fusion,
-            shard: currentReq.shard,
-            gold: currentReq.gold,
-            breath: 0
+            stone: currentReq.stone, leap: currentReq.leap, fusion: currentReq.fusion,
+            shard: currentReq.shard, gold: currentReq.gold, breath: 0
         };
 
-        const isJangGiBaek = currentArtisan >= 100;
+        const isJangGiBaek = currentArtisanPercent >= 100;
         let shouldUseBreath = tryCount <= mixedLimit;
-        
-        // 장기백 도달 시 숨결 사용 안 함 (강제 노숨)
         if (isJangGiBaek) shouldUseBreath = false; 
 
-        if (shouldUseBreath) {
-            needed.breath = reqBreathCount;
-        }
+        if (shouldUseBreath) needed.breath = reqBreathCount;
 
-        // 2. 비용 계산 (귀속 재료 우선 차감 로직)
         let tryCost = 0;
         
-        // 비용 계산 대상 항목들 (숨결 포함)
-        const costItems = ['stone', 'leap', 'fusion', 'shard', 'breath'];
-        
-        costItems.forEach(key => {
-            const name = MAT_NAMES[key];
-            const amount = needed[key];
-            
+        const calcItemCost = (amount, name) => {
             if (amount > 0) {
                 if (isBoundMaterialFree) {
                     let have = currentBound[name] || 0;
                     if (have >= amount) {
-                        currentBound[name] -= amount; // 보유량 차감, 비용 0
+                        currentBound[name] -= amount; 
                     } else {
                         let deficit = amount - have;
-                        tryCost += deficit * (prices[name] || 0); // 부족분만 비용 청구
-                        currentBound[name] = 0; // 다 씀
+                        tryCost += deficit * (prices[name] || 0);
+                        currentBound[name] = 0; 
                     }
                 } else {
-                    // 체크박스 안 켰으면 전액 골드 비용
                     tryCost += amount * (prices[name] || 0);
                 }
             }
-        });
+        };
 
-        // 골드는 항상 비용에 추가
+        calcItemCost(needed.stone, stoneName);
+        calcItemCost(needed.leap, "위대한 운명의 돌파석");
+        calcItemCost(needed.fusion, "상급 아비도스 융화 재료");
+        calcItemCost(needed.shard, "운명의 파편");
+        calcItemCost(needed.breath, breathName);
+
         tryCost += needed.gold;
 
-        // 3. 재료 소모량 통계 누적 (귀속 여부 상관없이 총 소모량)
-        ['stone', 'leap', 'fusion', 'shard', 'gold', 'breath'].forEach(key => {
-            const amount = needed[key];
-            accMats[key] += amount; 
-            if (!isJangGiBaek) {
-                expMats[key] += amount * cumulativeFailProb; 
-            }
-        });
+        const addToMats = (targetObj, scale = 1) => {
+            if (isWeapon) targetObj.weaponStone += needed.stone * scale;
+            else targetObj.armorStone += needed.stone * scale;
+            
+            targetObj.leap += needed.leap * scale;
+            targetObj.fusion += needed.fusion * scale;
+            targetObj.shard += needed.shard * scale;
+            targetObj.gold += needed.gold * scale;
+            targetObj.breath += needed.breath * scale;
+        };
 
-        // 4. 확률 계산 및 진행
-        const failBonus = Math.min(tryCount - 1, 10) * (baseProb / 10);
+        addToMats(accMats, 1);
+        if (!isJangGiBaek) addToMats(expMats, cumulativeFailProb);
+
+        const currentFailBonus = Math.min(tryCount - 1, 10) * (baseProb / 10);
         const breathBonus = shouldUseBreath ? baseProb : 0; 
-        let successRate = baseProb + failBonus + breathBonus;
+        
+        let successRate = baseProb + currentFailBonus + breathBonus + initialProbBonus;
         if (isJangGiBaek) successRate = 100;
 
         totalCostAccumulated += tryCost;
-        if (!isJangGiBaek) {
-             expectedCost += tryCost * cumulativeFailProb;
-        }
+        if (!isJangGiBaek) expectedCost += tryCost * cumulativeFailProb;
 
         tableRows.push({
             try: tryCount,
             method: isJangGiBaek ? "노숨(장기백)" : (shouldUseBreath ? "풀숨" : "노숨"),
             successRate: Math.min(successRate, 100).toFixed(2),
-            artisan: Math.min(currentArtisan, 100).toFixed(2),
+            artisan: Math.min(currentArtisanPercent, 100).toFixed(2),
             cost: tryCost.toLocaleString(undefined, {maximumFractionDigits: 0}),
             accCost: totalCostAccumulated.toLocaleString(undefined, {maximumFractionDigits: 0})
         });
@@ -316,80 +294,215 @@ export default function LostArkRefiningCalc() {
 
         let artisanGain = successRate * 0.465;
         artisanGain = Math.round(artisanGain * 100) / 100;
-        currentArtisan += artisanGain;
+        currentArtisanPercent += artisanGain;
         cumulativeFailProb *= (1 - (successRate / 100));
     }
 
     return {
         avgCost: Math.floor(expectedCost),
         artisanCost: Math.floor(totalCostAccumulated),
-        avgMats: expMats, 
-        artisanMats: accMats, 
-        rows: tableRows,
-        mixedLimit: mixedLimit
+        avgMats: expMats, artisanMats: accMats, rows: tableRows, mixedLimit: mixedLimit
     };
   };
 
   const runOptimization = () => {
     setResultTab('optimal'); 
+    
+    let tasks = [];
 
-    const noBreathResult = simulateStrategy(0);
-    const fullBreathResult = simulateStrategy(100);
-
-    let bestResult = noBreathResult;
-    let bestLimit = 0;
-
-    for (let limit = 1; limit <= 50; limit++) {
-        const res = simulateStrategy(limit);
-        if (res.avgCost < bestResult.avgCost) {
-            bestResult = res;
-            bestLimit = limit;
-        }
+    if (equipTab === 'simple') {
+        // 간편: 목표 단계 1개. (Start = Target - 1)
+        const start = simpleTargetLevel - 1;
+        tasks.push({
+            name: simpleEquipmentType,
+            type: simpleEquipmentType, 
+            start: start,
+            end: simpleTargetLevel,
+            count: 1
+        });
+    } else {
+        Object.entries(detailSettings).forEach(([key, setting]) => {
+            if (setting.active) {
+                if (setting.start < setting.end) {
+                    tasks.push({
+                        name: setting.name, 
+                        type: setting.type, 
+                        start: setting.start,
+                        end: setting.end,
+                        count: 1
+                    });
+                }
+            }
+        });
+        if (tasks.length === 0) { alert("활성화된 부위가 없거나 목표 단계가 낮습니다."); return; }
     }
 
-    setCalcResult({
-        no: noBreathResult,
-        full: fullBreathResult,
-        optimal: bestResult,
-        bestLimit: bestLimit
+    let totalSteps = 0;
+    tasks.forEach(t => totalSteps += (t.end - t.start));
+
+    function initMats() { return { weaponStone: 0, armorStone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, breath: 0 }; }
+
+    let batchResult = {
+        optimal: { avgCost: 0, artisanCost: 0, avgMats: initMats(), artisanMats: initMats(), summaryRows: [] },
+        no:      { avgCost: 0, artisanCost: 0, avgMats: initMats(), artisanMats: initMats(), summaryRows: [] },
+        full:    { avgCost: 0, artisanCost: 0, avgMats: initMats(), artisanMats: initMats(), summaryRows: [] },
+        isBatch: totalSteps > 1 
+    };
+
+    let boundState = {
+        optimal: { ...boundItems },
+        no: { ...boundItems },
+        full: { ...boundItems }
+    };
+
+    let isFirstStepProcessed = false;
+
+    tasks.forEach(task => {
+        // ★ loop: start+1 부터 end 까지.
+        // 예: Start 11, End 12 -> loop 12. (12강 트라이)
+        // 예: Start 11, End 13 -> loop 12, 13.
+        for (let lvl = task.start + 1; lvl <= task.end; lvl++) {
+            
+            const useUserInput = (equipTab === 'simple') && !isFirstStepProcessed;
+            const probBonus = useUserInput ? addedProb : 0;
+            const artisanStart = useUserInput ? currentArtisan : 0;
+            isFirstStepProcessed = true;
+
+            const noRes = simulateOneStep(lvl, task.type, 0, boundState.no, probBonus, artisanStart);
+            const fullRes = simulateOneStep(lvl, task.type, 100, boundState.full, probBonus, artisanStart);
+            
+            let bestRes = null;
+            let bestLimit = 0;
+            let bestCost = Infinity;
+
+            for (let limit = 0; limit <= 50; limit++) { 
+                let tempBound = { ...boundState.optimal }; 
+                const res = simulateOneStep(lvl, task.type, limit, tempBound, probBonus, artisanStart);
+                if (res.avgCost < bestCost) {
+                    bestCost = res.avgCost;
+                    bestRes = res;
+                    bestLimit = limit;
+                }
+            }
+            bestRes = simulateOneStep(lvl, task.type, bestLimit, boundState.optimal, probBonus, artisanStart);
+
+            const addToTotal = (target, source, label, limit, count) => {
+                target.avgCost += source.avgCost * count;
+                target.artisanCost += source.artisanCost * count;
+                ['weaponStone', 'armorStone', 'leap', 'fusion', 'shard', 'gold', 'breath'].forEach(key => {
+                    target.avgMats[key] += source.avgMats[key] * count;
+                    target.artisanMats[key] += source.artisanMats[key] * count;
+                });
+                target.summaryRows.push({
+                    desc: `${task.name} ${lvl-1}→${lvl}`, // 표시: 11->12
+                    strategy: label,
+                    limit: limit,
+                    avgCost: source.avgCost,
+                    artisanCost: source.artisanCost,
+                    detail: source.rows 
+                });
+            };
+
+            const strategyName = bestLimit === 0 ? "노숨" : (bestLimit >= 50 ? "풀숨" : `혼합(${bestLimit}트)`);
+            addToTotal(batchResult.optimal, bestRes, strategyName, bestLimit, task.count);
+            addToTotal(batchResult.no, noRes, "노숨", 0, task.count);
+            addToTotal(batchResult.full, fullRes, "풀숨", 100, task.count);
+        }
     });
+
+    setCalcResult(batchResult);
   };
 
-  // 재료 표시용 컴포넌트 (순서: 결정, 돌파, 융화, 파편, 골드, 숨결)
   const MaterialDisplay = ({ mats }) => {
-      // 요청하신 순서대로 배열 정의
       const displayOrder = [
-          { key: 'stone', name: MAT_NAMES.stone },
-          { key: 'leap', name: MAT_NAMES.leap },
-          { key: 'fusion', name: MAT_NAMES.fusion },
-          { key: 'shard', name: MAT_NAMES.shard },
-          { key: 'gold', name: '골드' },
-          { key: 'breath', name: MAT_NAMES.breath },
+          { key: 'weaponStone', name: "운명의 파괴석 결정" },
+          { key: 'armorStone', name: "운명의 수호석 결정" },
+          { key: 'leap', name: "위대한 운명의 돌파석" },
+          { key: 'fusion', name: "상급 아비도스 융화 재료" },
+          { key: 'shard', name: "운명의 파편" },
+          { key: 'gold', name: "골드" },
+          { key: 'breath', name: "숨결" }, 
       ];
 
       return (
-          // 스크린샷처럼 가로로 배치 (화면 작으면 줄바꿈)
           <div className="flex flex-wrap gap-4 mt-2">
               {displayOrder.map(item => {
                   const amount = mats[item.key] || 0;
-                  // 0개인 재료는 표시하지 않음 (깔끔하게)
                   if (amount <= 0) return null;
                   
+                  let displayIconName = item.name;
+                  if (item.key === 'breath') displayIconName = "용암의 숨결"; // 아이콘용
+
                   return (
                       <div key={item.key} className="flex items-center text-xs">
-                          {/* 아이콘 */}
                           <div className="mr-1">
-                             <ItemIcon info={itemInfos[item.name]} name={item.name} />
+                             <ItemIcon info={itemInfos[displayIconName]} name={displayIconName} />
                           </div>
-                          {/* 수량 */}
-                          <div className="flex flex-col">
-                              <span className="font-bold text-gray-700">
-                                  x {amount.toLocaleString(undefined, {maximumFractionDigits: 1})}
-                              </span>
-                          </div>
+                          <span className="font-bold text-gray-700">
+                              x {amount.toLocaleString(undefined, {maximumFractionDigits: 1})}
+                          </span>
                       </div>
                   );
               })}
+          </div>
+      );
+  };
+
+  const renderPreviewMaterials = () => {
+      // ★ 여러 부위 강화 탭일 때 비활성화
+      if (equipTab === 'detail') {
+          return (
+              <div className="text-center py-8 text-gray-500 text-sm bg-gray-50 rounded border border-gray-200">
+                  여러 부위 강화를<br/>선택하셨습니다
+              </div>
+          );
+      }
+
+      // 간편 모드: 목표 단계 1회 비용 (즉, Target 레벨의 트라이 비용)
+      const currentLevel = simpleTargetLevel; // 단순 목표 레벨 기준 데이터
+      // 데이터는 해당 레벨로 가는 비용이므로 key = simpleTargetLevel
+      const req = REFINE_DATA[simpleEquipmentType]?.[currentLevel] || { gold: 0 };
+      const breath = getBreathCount(currentLevel);
+      
+      const stoneName = simpleEquipmentType === '무기' ? "운명의 파괴석 결정" : "운명의 수호석 결정";
+      const breathName = simpleEquipmentType === '무기' ? "용암의 숨결" : "빙하의 숨결";
+
+      const items = [
+          { key: 'stone', name: stoneName, count: req.stone },
+          { key: 'leap', name: "위대한 운명의 돌파석", count: req.leap },
+          { key: 'fusion', name: "상급 아비도스 융화 재료", count: req.fusion },
+          { key: 'shard', name: "운명의 파편", count: req.shard },
+          { key: 'breath', name: breathName, count: breath },
+      ];
+
+      return (
+          <div className="space-y-2">
+              {items.map(item => {
+                  if (!item.count || item.count <= 0) return null;
+                  let cost = item.count * (prices[item.name] || 0);
+                  if (isBoundMaterialFree) {
+                      let have = boundItems[item.name] || 0;
+                      cost = Math.max(0, item.count - have) * (prices[item.name] || 0);
+                  }
+                  return (
+                      <div key={item.key} className="flex justify-between items-center text-xs">
+                          <div className="flex items-center">
+                              <ItemIcon info={itemInfos[item.name]} name={item.name} />
+                              <span>x {item.count.toLocaleString()}</span>
+                          </div>
+                          <span className={`text-gray-500 ${cost < (item.count * (prices[item.name]||0)) ? 'text-blue-600 font-bold' : ''}`}>
+                             {cost.toLocaleString(undefined, {maximumFractionDigits: 0})} G
+                          </span>
+                      </div>
+                  )
+              })}
+               <div className="flex justify-between items-center text-xs">
+                <div className="flex items-center">
+                  <ItemIcon info={null} name="골드" />
+                  <span>x {req.gold.toLocaleString()}</span>
+                </div>
+                <span className="text-gray-500">{req.gold.toLocaleString()} G</span>
+              </div>
           </div>
       );
   };
@@ -409,7 +522,6 @@ export default function LostArkRefiningCalc() {
 
       <div className="flex flex-col lg:flex-row gap-4">
         
-        {/* 좌측 패널 */}
         <div className="w-full lg:w-1/5 bg-white rounded shadow border overflow-hidden">
           <div className="flex border-b">
             <button className={`flex-1 py-3 font-bold transition ${activeTab === 'price' ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`} onClick={() => setActiveTab('price')}>가격 정보</button>
@@ -449,69 +561,169 @@ export default function LostArkRefiningCalc() {
           </div>
         </div>
 
-        {/* 중앙 패널 */}
         <div className="w-full lg:w-1/5 space-y-4">
           <div className="bg-white p-4 rounded shadow border">
             <h2 className="font-bold text-gray-700 mb-4 border-b pb-2">장비 정보</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-gray-500 text-xs mb-1">장비 종류</label>
-                <select className="w-full border rounded p-2" value={equipmentType} onChange={(e) => setEquipmentType(e.target.value)}>
-                  <option value="방어구">방어구 (T4)</option>
-                  <option value="무기">무기 (T4)</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-gray-500 text-xs mb-1">목표 단계</label>
-                <select className="w-full border rounded p-2" value={targetLevel} onChange={(e) => setTargetLevel(Number(e.target.value))}>
-                  {[...Array(14)].map((_, i) => {
-                    const level = i + 12;
-                    return <option key={level} value={level}>{level}단계</option>
-                  })}
-                </select>
-              </div>
-              <div className="pt-2 border-t flex justify-between text-xs">
-                 <span className="text-gray-600">기본 확률</span>
-                 <span className="font-bold text-blue-600">{BASE_PROBABILITIES[targetLevel] || 0}%</span>
-              </div>
+            
+            <div className="flex mb-4 bg-gray-100 rounded p-1">
+                <button 
+                    className={`flex-1 py-1 rounded text-xs font-bold transition ${equipTab === 'simple' ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`}
+                    onClick={() => setEquipTab('simple')}
+                >
+                    간편 설정
+                </button>
+                <button 
+                    className={`flex-1 py-1 rounded text-xs font-bold transition ${equipTab === 'detail' ? 'bg-white shadow text-indigo-600' : 'text-gray-500'}`}
+                    onClick={() => setEquipTab('detail')}
+                >
+                    여러 부위 강화
+                </button>
             </div>
+
+            {equipTab === 'simple' ? (
+                <div className="space-y-4">
+                    <div>
+                        <label className="block text-gray-500 text-xs mb-1">장비 종류</label>
+                        <select className="w-full border rounded p-2" value={simpleEquipmentType} onChange={(e) => setSimpleEquipmentType(e.target.value)}>
+                        <option value="방어구">방어구 (T4)</option>
+                        <option value="무기">무기 (T4)</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-gray-500 text-xs mb-1">목표 단계</label>
+                        <select className="w-full border rounded p-2" value={simpleTargetLevel} onChange={(e) => setSimpleTargetLevel(Number(e.target.value))}>
+                        {[...Array(14)].map((_, i) => {
+                            const level = i + 12;
+                            if (level > 25) return null;
+                            return <option key={level} value={level}>{level}단계</option>
+                        })}
+                        </select>
+                    </div>
+                    
+                   {/* 확률 정보 입력 (동적 스텝 및 % 디자인 적용) */}
+            <div className="space-y-2 pt-2 border-t mt-2">
+                {/* 렌더링 시점에 기본 확률과 스텝 계산 */}
+                {(() => {
+                    // 현재 목표 단계의 직전 단계 확률 (즉, 트라이할 단계의 확률)
+                    const baseProb = BASE_PROBABILITIES[simpleTargetLevel] || 0;
+                    // 1틱당 변화량 = 기본확률 / 10 (예: 5% -> 0.5, 1.5% -> 0.15)
+                    const stepValue = baseProb / 10; 
+
+                    return (
+                        <>
+                            <div>
+                                <label className="block text-gray-500 text-xs mb-1">기본 확률</label>
+                                <div className="relative">
+                                    <input 
+                                        type="text" 
+                                        className="w-full border rounded p-2 text-right bg-gray-100 text-gray-600 pr-8" 
+                                        value={`${baseProb}`} 
+                                        readOnly
+                                    />
+                                    <span className="absolute right-3 top-2.5 text-gray-400 text-xs select-none">%</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label className="block text-gray-500 text-xs mb-1">실패로 추가된 확률</label>
+                                <div className="relative">
+                                    <input 
+                                        type="number" 
+                                        className="w-full border rounded p-2 text-right pr-8" 
+                                        value={addedProb} 
+                                        step={stepValue} // ★ 핵심: 동적 스텝 적용
+                                        onChange={(e) => {
+                                            let val = parseFloat(e.target.value);
+                                            if (isNaN(val) || val < 0) val = 0;
+                                            
+                                            // 최대치 제한 (기본 확률까지만)
+                                            if (val > baseProb) val = baseProb;
+                                            
+                                            // 소수점 자릿수 처리 (부동소수점 오차 방지)
+                                            // stepValue의 소수점 자릿수만큼만 유지
+                                            const decimals = (stepValue.toString().split('.')[1] || []).length;
+                                            val = parseFloat(val.toFixed(decimals));
+
+                                            setAddedProb(val);
+                                        }}
+                                        placeholder="0"
+                                    />
+                                    <span className="absolute right-3 top-2.5 text-gray-400 text-xs select-none">%</span>
+                                </div>
+                                <p className="text-[10px] text-gray-400 text-right mt-1">
+                                    * 최대 {baseProb}%까지 (1회 실패당 +{stepValue}%)
+                                </p>
+                            </div>
+
+                            <div>
+                                <label className="block text-gray-500 text-xs mb-1">현재 장기백</label>
+                                <div className="relative">
+                                    <input 
+                                        type="number" 
+                                        className="w-full border rounded p-2 text-right pr-8" 
+                                        value={currentArtisan} 
+                                        onChange={(e) => {
+                                            let val = parseFloat(e.target.value);
+                                            if (isNaN(val) || val < 0) val = 0;
+                                            if (val > 100) val = 100; // 100% 초과 금지
+                                            setCurrentArtisan(val);
+                                        }}
+                                        placeholder="0"
+                                    />
+                                    <span className="absolute right-3 top-2.5 text-gray-400 text-xs select-none">%</span>
+                                </div>
+                            </div>
+                        </>
+                    );
+                })()}
+            </div>
+                </div>
+            ) : (
+                <div className="space-y-2 max-h-[400px] overflow-y-auto pr-1">
+                    {Object.entries(detailSettings).map(([key, setting]) => (
+                        <div key={key} className={`flex items-center gap-1 p-2 rounded border ${setting.active ? 'bg-indigo-50 border-indigo-200' : 'bg-gray-50 border-gray-200'}`}>
+                            <input 
+                                type="checkbox" 
+                                checked={setting.active} 
+                                onChange={(e) => handleDetailChange(key, 'active', e.target.checked)}
+                                className="w-4 h-4 text-indigo-600 rounded"
+                            />
+                            <span className={`text-xs font-bold w-8 ${setting.active ? 'text-gray-800' : 'text-gray-400'}`}>{setting.name}</span>
+                            
+                            <select 
+                                className="w-14 text-xs border rounded p-1" 
+                                value={setting.start} 
+                                disabled={!setting.active}
+                                onChange={(e) => handleDetailChange(key, 'start', Number(e.target.value))}
+                            >
+                                {[...Array(14)].map((_, i) => {
+                                    const lvl = i + 11;
+                                    if (lvl > 24) return null;
+                                    return <option key={lvl} value={lvl}>{lvl}</option>
+                                })}
+                            </select>
+                            <span className="text-gray-400">→</span>
+                            <select 
+                                className="w-14 text-xs border rounded p-1" 
+                                value={setting.end} 
+                                disabled={!setting.active}
+                                onChange={(e) => handleDetailChange(key, 'end', Number(e.target.value))}
+                            >
+                                {[...Array(14)].map((_, i) => {
+                                    const lvl = i + 12;
+                                    if (lvl <= setting.start) return null;
+                                    return <option key={lvl} value={lvl}>{lvl}</option>
+                                })}
+                            </select>
+                        </div>
+                    ))}
+                </div>
+            )}
           </div>
 
           <div className="bg-white p-4 rounded shadow border">
-            <h2 className="font-bold text-gray-700 mb-4 border-b pb-2">1회 필수 재료</h2>
-            <div className="space-y-2">
-              {[MAT_NAMES.shard, MAT_NAMES.fusion, MAT_NAMES.leap, MAT_NAMES.stone].map(itemName => {
-                  let reqKey = Object.keys(MAT_NAMES).find(key => MAT_NAMES[key] === itemName);
-                  let count = currentReq[reqKey];
-                  let cost = (prices[itemName] || 0) * count;
-                  
-                  let displayCost = cost;
-                  if (isBoundMaterialFree) {
-                      let have = boundItems[itemName] || 0;
-                      let needed = count;
-                      displayCost = Math.max(0, needed - have) * (prices[itemName] || 0);
-                  }
-
-                  return (
-                    <div key={itemName} className="flex justify-between items-center text-xs">
-                        <div className="flex items-center">
-                        <ItemIcon info={itemInfos[itemName]} name={itemName} />
-                        <span>x {count.toLocaleString()}</span>
-                        </div>
-                        <span className={`text-gray-500 ${displayCost < cost ? 'text-blue-600 font-bold' : ''}`}>
-                            {displayCost.toLocaleString(undefined, {maximumFractionDigits: 0})} G
-                        </span>
-                    </div>
-                  )
-              })}
-               <div className="flex justify-between items-center text-xs">
-                <div className="flex items-center">
-                  <ItemIcon info={null} name="골드" />
-                  <span>x {currentReq.gold.toLocaleString()}</span>
-                </div>
-                <span className="text-gray-500">{currentReq.gold.toLocaleString()} G</span>
-              </div>
-            </div>
+            <h2 className="font-bold text-gray-700 mb-2 border-b pb-2">1회 필수 재료</h2>
+            {renderPreviewMaterials()}
 
             <div className="mt-3 pt-3 border-t">
                 <label className="flex items-center space-x-2 cursor-pointer select-none">
@@ -525,38 +737,12 @@ export default function LostArkRefiningCalc() {
                 </label>
             </div>
 
-            <div className="mt-4 pt-3 border-t text-xs text-gray-600">
-                 <div className="flex items-center justify-between mb-1">
-                    <span className="flex items-center font-bold">
-                        <ItemIcon info={itemInfos[MAT_NAMES.breath]} name={MAT_NAMES.breath} />
-                        {MAT_NAMES.breath}
-                    </span>
-                    <span className="font-bold text-blue-600">{reqBreathCount}개 필요</span>
-                 </div>
-                 <div className="flex justify-between text-gray-400">
-                     <span>1회 추가 비용</span>
-                     {/* 숨결 표시 비용도 귀속 여부에 따라 다르게 표시 */}
-                     <span>
-                        {(() => {
-                            let totalCost = (prices[MAT_NAMES.breath] || 0) * reqBreathCount;
-                            if (isBoundMaterialFree) {
-                                let have = boundItems[MAT_NAMES.breath] || 0;
-                                let needed = reqBreathCount;
-                                totalCost = Math.max(0, needed - have) * (prices[MAT_NAMES.breath] || 0);
-                            }
-                            return totalCost.toLocaleString();
-                        })()} G
-                     </span>
-                 </div>
-            </div>
-
             <button onClick={runOptimization} className="w-full bg-indigo-600 text-white py-3 rounded mt-4 hover:bg-indigo-700 font-bold shadow-md">
               최적화 계산하기
             </button>
           </div>
         </div>
 
-        {/* 우측 패널 */}
         <div className="w-full lg:w-3/5 bg-white rounded shadow border flex flex-col overflow-hidden">
            {!calcResult ? (
                 <div className="flex items-center justify-center h-full text-gray-400 p-10">
@@ -569,7 +755,7 @@ export default function LostArkRefiningCalc() {
                         className={`flex-1 py-3 font-bold text-sm ${resultTab === 'optimal' ? 'bg-white border-t-2 border-indigo-600 text-indigo-700' : 'text-gray-500 hover:bg-gray-100'}`}
                         onClick={() => setResultTab('optimal')}
                     >
-                        🏆 추천 최적 ({calcResult.bestLimit === 0 ? "노숨" : (calcResult.bestLimit >= 50 ? "풀숨" : "혼합")})
+                        🏆 추천 최적
                     </button>
                     <button 
                         className={`flex-1 py-3 font-bold text-sm ${resultTab === 'no' ? 'bg-white border-t-2 border-gray-600 text-gray-700' : 'text-gray-500 hover:bg-gray-100'}`}
@@ -587,21 +773,28 @@ export default function LostArkRefiningCalc() {
 
                 <div className="p-4 flex-1 flex flex-col overflow-hidden">
                     <div className="mb-4">
-                        {/* 1. 요약 박스 */}
-                        {resultTab === 'optimal' && (
+                        {resultTab === 'optimal' && calcResult.isBatch && (
                             <div className="bg-indigo-50 p-4 rounded border border-indigo-200 mb-4">
                                 <h3 className="font-bold text-indigo-900 text-lg mb-1">
-                                    💡 최적 전략: {calcResult.bestLimit === 0 ? "끝까지 '노숨'" : (calcResult.bestLimit >= 50 ? "끝까지 '풀숨'" : `${calcResult.bestLimit}트까지 '풀숨', 이후 '노숨'`)}
+                                    💡 자동 최적화 완료
                                 </h3>
                                 <p className="text-sm text-indigo-700">
-                                    이 방식이 평균적으로 가장 저렴합니다. (평균 {calcResult.optimal.avgCost.toLocaleString()} G)
+                                    구간별 최적 전략을 자동 계산했습니다.
+                                </p>
+                            </div>
+                        )}
+                        {resultTab === 'optimal' && !calcResult.isBatch && (
+                             <div className="bg-indigo-50 p-4 rounded border border-indigo-200 mb-4">
+                                <h3 className="font-bold text-indigo-900 text-lg mb-1">
+                                    💡 최적 전략: {calcResult.optimal.summaryRows[0]?.strategy}
+                                </h3>
+                                <p className="text-sm text-indigo-700">
+                                    평균적으로 가장 저렴한 방식입니다.
                                 </p>
                             </div>
                         )}
 
-                        {/* 2. 재료 소모량 정보 (수정됨: 비용 폰트 키움) */}
                         <div className="space-y-4 mb-4">
-                            {/* 평균 소모 재료 박스 */}
                             <div className="p-4 bg-white rounded border w-full shadow-sm">
                                 <div className="flex justify-between items-end mb-3 border-b pb-2">
                                     <h3 className="font-bold text-lg text-gray-700">평균 소모 재료 (기댓값)</h3>
@@ -610,7 +803,6 @@ export default function LostArkRefiningCalc() {
                                 <MaterialDisplay mats={calcResult[resultTab].avgMats} />
                             </div>
                             
-                            {/* 장기백 소모 재료 박스 */}
                             <div className="p-4 bg-white rounded border w-full shadow-sm border-red-100">
                                 <div className="flex justify-between items-end mb-3 border-b border-red-100 pb-2">
                                     <h3 className="font-bold text-lg text-red-900">장기백 소모 재료 (100%)</h3>
@@ -624,26 +816,46 @@ export default function LostArkRefiningCalc() {
                     <div className="flex-1 overflow-auto border rounded relative">
                         <table className="w-full text-center text-sm">
                             <thead className="bg-gray-100 sticky top-0 text-gray-600 font-semibold z-10 shadow-sm">
-                                <tr>
-                                    <th className="p-3">트라이</th>
-                                    <th className="p-3">방식</th>
-                                    <th className="p-3">성공 확률</th>
-                                    <th className="p-3">장인의 기운</th>
-                                    <th className="p-3">비용</th>
-                                    <th className="p-3">누적 비용</th>
-                                </tr>
+                                {calcResult.isBatch ? (
+                                    <tr>
+                                        <th className="p-3">구간</th>
+                                        <th className="p-3">적용 전략</th>
+                                        <th className="p-3">예상 비용 (평균)</th>
+                                        <th className="p-3">장기백 비용</th>
+                                    </tr>
+                                ) : (
+                                    <tr>
+                                        <th className="p-3">트라이</th>
+                                        <th className="p-3">방식</th>
+                                        <th className="p-3">성공 확률</th>
+                                        <th className="p-3">장인의 기운</th>
+                                        <th className="p-3">비용</th>
+                                        <th className="p-3">누적 비용</th>
+                                    </tr>
+                                )}
                             </thead>
                             <tbody className="divide-y">
-                                {calcResult[resultTab].rows.map((row) => (
-                                    <tr key={row.try} className={`hover:bg-gray-50 ${parseFloat(row.successRate) >= 100 ? 'bg-green-50' : ''}`}>
-                                        <td className="p-2">{row.try}트</td>
-                                        <td className={`p-2 font-bold ${row.method === '풀숨' ? 'text-blue-600' : 'text-gray-500'}`}>{row.method}</td>
-                                        <td className="p-2 font-bold text-gray-700">{row.successRate}%</td>
-                                        <td className="p-2 text-gray-500">{row.artisan}%</td>
-                                        <td className="p-2">{row.cost} G</td>
-                                        <td className="p-2 text-gray-500">{row.accCost} G</td>
-                                    </tr>
-                                ))}
+                                {calcResult.isBatch ? (
+                                    calcResult[resultTab].summaryRows.map((row, idx) => (
+                                        <tr key={idx} className="hover:bg-gray-50 cursor-pointer" onClick={() => !calcResult.isBatch && alert("상세 정보")}>
+                                            <td className="p-3 font-bold">{row.desc}</td>
+                                            <td className="p-3 text-blue-600 font-bold">{row.strategy}</td>
+                                            <td className="p-3">{row.avgCost.toLocaleString()} G</td>
+                                            <td className="p-3 text-red-500">{row.artisanCost.toLocaleString()} G</td>
+                                        </tr>
+                                    ))
+                                ) : (
+                                    calcResult[resultTab].summaryRows[0]?.detail.map((row) => (
+                                        <tr key={row.try} className={`hover:bg-gray-50 ${parseFloat(row.successRate) >= 100 ? 'bg-green-50' : ''}`}>
+                                            <td className="p-2">{row.try}트</td>
+                                            <td className={`p-2 font-bold ${row.method.includes('풀숨') ? 'text-blue-600' : 'text-gray-500'}`}>{row.method}</td>
+                                            <td className="p-2 font-bold text-gray-700">{row.successRate}%</td>
+                                            <td className="p-2 text-gray-500">{row.artisan}%</td>
+                                            <td className="p-2">{row.cost} G</td>
+                                            <td className="p-2 text-gray-500">{row.accCost} G</td>
+                                        </tr>
+                                    ))
+                                )}
                             </tbody>
                         </table>
                     </div>
