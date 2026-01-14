@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 
-// ★ 재료 이름 정의 (최상단)
+// ★ 재료 이름 정의
 const MAT_NAMES = {
   stone: "결정", 
   leap: "위대한 운명의 돌파석",
@@ -15,7 +15,7 @@ const GRADE_BG = {
   '영웅': 'bg-purple-600', '전설': 'bg-orange-500', '유물': 'bg-red-600', '고대': 'bg-yellow-100',
 };
 
-// 원본 확률 데이터 (12~25)
+// 원본 확률 데이터
 const BASE_PROBABILITIES = {
   12: 5.0, 13: 5.0, 14: 4.0, 15: 4.0, 16: 4.0,
   17: 3.0, 18: 3.0, 19: 3.0, 20: 1.5, 21: 1.5,
@@ -92,11 +92,9 @@ export default function LostArkRefiningCalc() {
   const [addedProb, setAddedProb] = useState(0); 
   const [currentArtisan, setCurrentArtisan] = useState(0); 
 
-  // 일괄 변경 상태
   const [isBatchStart, setIsBatchStart] = useState(false);
   const [isBatchEnd, setIsBatchEnd] = useState(false);
 
-  // 초기값: 11->12 설정
   const [detailSettings, setDetailSettings] = useState({
     weapon:   { name: '무기', type: '무기', active: true, start: 11, end: 12 },
     head:     { name: '머리', type: '방어구', active: true, start: 11, end: 12 },
@@ -143,7 +141,6 @@ export default function LostArkRefiningCalc() {
         "운명의 파편 주머니(대)", "상급 아비도스 융화 재료", "운명의 수호석 결정",
         "운명의 파괴석 결정", "위대한 운명의 돌파석", "용암의 숨결", "빙하의 숨결"
       ];
-      // API 경로: 로컬 서버리스 함수 (/api/market) 사용
       const requests = targetItemList.map(itemName => 
         fetch('/api/market', {
           method: 'POST',
@@ -246,28 +243,32 @@ export default function LostArkRefiningCalc() {
     
     const isWeapon = type === "무기";
     const stoneName = isWeapon ? "운명의 파괴석 결정" : "운명의 수호석 결정";
-    const breathName = isWeapon ? "용암의 숨결" : "빙하의 숨결";
+    
+    // ★ 숨결 분리 로직
+    let accMats = { weaponStone: 0, armorStone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, lavaBreath: 0, glacialBreath: 0 };
+    let expMats = { weaponStone: 0, armorStone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, lavaBreath: 0, glacialBreath: 0 };
+    const tableRows = [];
 
     let currentArtisanPercent = initialArtisanPercent; 
     let totalCostAccumulated = 0; 
     let expectedCost = 0; 
     let cumulativeFailProb = 1; 
-    
-    let accMats = { weaponStone: 0, armorStone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, breath: 0 };
-    let expMats = { weaponStone: 0, armorStone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, breath: 0 };
-    const tableRows = [];
 
     for (let tryCount = 1; tryCount <= 100; tryCount++) {
         let needed = {
             stone: currentReq.stone, leap: currentReq.leap, fusion: currentReq.fusion,
-            shard: currentReq.shard, gold: currentReq.gold, breath: 0
+            shard: currentReq.shard, gold: currentReq.gold, 
+            lavaBreath: 0, glacialBreath: 0
         };
 
         const isJangGiBaek = currentArtisanPercent >= 100;
         let shouldUseBreath = tryCount <= mixedLimit;
         if (isJangGiBaek) shouldUseBreath = false; 
 
-        if (shouldUseBreath) needed.breath = reqBreathCount;
+        if (shouldUseBreath) {
+            if (isWeapon) needed.lavaBreath = reqBreathCount;
+            else needed.glacialBreath = reqBreathCount;
+        }
 
         let tryCost = 0;
         
@@ -292,7 +293,9 @@ export default function LostArkRefiningCalc() {
         calcItemCost(needed.leap, "위대한 운명의 돌파석");
         calcItemCost(needed.fusion, "상급 아비도스 융화 재료");
         calcItemCost(needed.shard, "운명의 파편");
-        calcItemCost(needed.breath, breathName);
+        // ★ 각각의 숨결 비용 계산
+        calcItemCost(needed.lavaBreath, "용암의 숨결");
+        calcItemCost(needed.glacialBreath, "빙하의 숨결");
 
         tryCost += needed.gold;
 
@@ -304,7 +307,10 @@ export default function LostArkRefiningCalc() {
             targetObj.fusion += needed.fusion * scale;
             targetObj.shard += needed.shard * scale;
             targetObj.gold += needed.gold * scale;
-            targetObj.breath += needed.breath * scale;
+            
+            // ★ 숨결 분리 누적
+            targetObj.lavaBreath += needed.lavaBreath * scale;
+            targetObj.glacialBreath += needed.glacialBreath * scale;
         };
 
         addToMats(accMats, 1);
@@ -377,12 +383,13 @@ export default function LostArkRefiningCalc() {
     let totalSteps = 0;
     tasks.forEach(t => totalSteps += (t.end - t.start));
 
-    function initMats() { return { weaponStone: 0, armorStone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, breath: 0 }; }
+    // ★ 초기화 객체에 숨결 2종 추가
+    function initMats() { return { weaponStone: 0, armorStone: 0, leap: 0, fusion: 0, shard: 0, gold: 0, lavaBreath: 0, glacialBreath: 0 }; }
 
     let batchResult = {
         optimal: { avgCost: 0, artisanCost: 0, avgMats: initMats(), artisanMats: initMats(), summaryRows: [] },
         no:      { avgCost: 0, artisanCost: 0, avgMats: initMats(), artisanMats: initMats(), summaryRows: [] },
-        full: { avgCost: 0, artisanCost: 0, avgMats: initMats(), artisanMats: initMats(), summaryRows: [] },
+        full:    { avgCost: 0, artisanCost: 0, avgMats: initMats(), artisanMats: initMats(), summaryRows: [] },
         isBatch: totalSteps > 1 
     };
 
@@ -423,7 +430,7 @@ export default function LostArkRefiningCalc() {
             const addToTotal = (target, source, label, limit, count) => {
                 target.avgCost += source.avgCost * count;
                 target.artisanCost += source.artisanCost * count;
-                ['weaponStone', 'armorStone', 'leap', 'fusion', 'shard', 'gold', 'breath'].forEach(key => {
+                ['weaponStone', 'armorStone', 'leap', 'fusion', 'shard', 'gold', 'lavaBreath', 'glacialBreath'].forEach(key => {
                     target.avgMats[key] += source.avgMats[key] * count;
                     target.artisanMats[key] += source.artisanMats[key] * count;
                 });
@@ -448,6 +455,7 @@ export default function LostArkRefiningCalc() {
   };
 
   const MaterialDisplay = ({ mats }) => {
+      // ★ 표시 순서에 숨결 2종 추가
       const displayOrder = [
           { key: 'weaponStone', name: "운명의 파괴석 결정" },
           { key: 'armorStone', name: "운명의 수호석 결정" },
@@ -455,7 +463,8 @@ export default function LostArkRefiningCalc() {
           { key: 'fusion', name: "상급 아비도스 융화 재료" },
           { key: 'shard', name: "운명의 파편" },
           { key: 'gold', name: "골드" },
-          { key: 'breath', name: "숨결" }, 
+          { key: 'lavaBreath', name: "용암의 숨결" }, 
+          { key: 'glacialBreath', name: "빙하의 숨결" },
       ];
 
       return (
@@ -464,13 +473,10 @@ export default function LostArkRefiningCalc() {
                   const amount = mats[item.key] || 0;
                   if (amount <= 0) return null;
                   
-                  let displayIconName = item.name;
-                  if (item.key === 'breath') displayIconName = "용암의 숨결"; 
-
                   return (
                       <div key={item.key} className="flex items-center text-xs">
                           <div className="mr-1">
-                             <ItemIcon info={itemInfos[displayIconName]} name={displayIconName} />
+                             <ItemIcon info={itemInfos[item.name]} name={item.name} />
                           </div>
                           <span className="font-bold text-gray-700">
                               x {amount.toLocaleString(undefined, {maximumFractionDigits: 1})}
@@ -496,6 +502,7 @@ export default function LostArkRefiningCalc() {
       const breath = getBreathCount(currentLevel);
       
       const stoneName = simpleEquipmentType === '무기' ? "운명의 파괴석 결정" : "운명의 수호석 결정";
+      // 1회 예상 미리보기도 정확한 숨결 이름 표시
       const breathName = simpleEquipmentType === '무기' ? "용암의 숨결" : "빙하의 숨결";
 
       const items = [
@@ -633,7 +640,7 @@ export default function LostArkRefiningCalc() {
                     
                     <div className="space-y-2 pt-2 border-t mt-2">
                         {(() => {
-                            const baseProb = BASE_PROBABILITIES[simpleTargetLevel] || 0;
+                            const baseProb = BASE_PROBABILITIES[simpleTargetLevel - 1] || 0;
                             const stepValue = baseProb / 10; 
 
                             return (
@@ -700,11 +707,8 @@ export default function LostArkRefiningCalc() {
                     </div>
                 </div>
             ) : (
-                /* ★ 여러 부위 강화 UI (버튼형 토글 + Grid 적용) */
                 <div className="flex flex-col h-full">
-                    {/* 상단 컨트롤 영역 */}
                     <div className="mb-2 space-y-2 pb-2 border-b">
-                        {/* 1행: 전체 선택 / 해제 */}
                         <div className="grid grid-cols-2 gap-2">
                              <button onClick={handleSelectAll} className="bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs py-2 rounded border font-bold transition">
                                 전체 선택
@@ -714,7 +718,6 @@ export default function LostArkRefiningCalc() {
                              </button>
                         </div>
 
-                        {/* 2행: 일괄 변경 토글 버튼 */}
                         <div className="grid grid-cols-2 gap-2">
                              <button 
                                 onClick={() => setIsBatchStart(!isBatchStart)} 
