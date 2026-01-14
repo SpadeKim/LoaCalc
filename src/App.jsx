@@ -633,7 +633,7 @@ export default function LostArkRefiningCalc() {
                     
                     <div className="space-y-2 pt-2 border-t mt-2">
                         {(() => {
-                            const baseProb = BASE_PROBABILITIES[simpleTargetLevel - 1] || 0;
+                            const baseProb = BASE_PROBABILITIES[simpleTargetLevel] || 0;
                             const stepValue = baseProb / 10; 
 
                             return (
